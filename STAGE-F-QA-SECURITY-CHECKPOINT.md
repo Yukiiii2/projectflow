@@ -2,6 +2,7 @@
 
 **Status:** Complete and verified locally
 **Date:** 2026-10-20
+**Reverified:** 2026-10-22
 **Frontend:** http://localhost:5173
 **API:** http://localhost:4000
 
@@ -91,6 +92,22 @@ Stage F reviewed and tested the completed Stage A–E application without adding
 | Horizontal overflow | 0 at all captured widths |
 | Temporary accounts remaining | 0 |
 | Duplicate Vite server on 5174 | None |
+
+## Resume verification — 2026-10-22
+
+Stage F was resumed from commit `ee20840` without restarting implementation. No reproducible application defect was found and no source-code change was required.
+
+- The development test continued to expose and exercise the dashboard preview-state controls.
+- A fresh production build contained zero occurrences of `Preview state` or `Prototype controls`.
+- The production bundle was served locally at `http://localhost:4173` and exercised against the real PostgreSQL-backed API.
+- The integrated Stage F workflow passed all nine checks and produced seven responsive captures with zero axe WCAG 2.2 A/AA violations, horizontal overflow, or out-of-bounds controls.
+- Registration, session restoration, workspace isolation, projects, tasks, Kanban persistence, invitations, roles, assignments, comments, activity, logout, and sign-in passed in the production-bundle workflow.
+- Request-size enforcement, authentication throttling, strict write-origin checks, safe errors, security headers, and session-cookie regression tests passed.
+- Frontend tests passed 32/32; backend tests passed 15/15; backend timezone runs passed 15/15 under UTC, America/Los_Angeles, and Asia/Taipei.
+- Frontend and backend TypeScript checks, production builds, and dependency audits passed. Both audits reported zero known vulnerabilities.
+- The browser workflow removed its isolated records and reported zero temporary accounts remaining.
+
+The remaining risks and deployment blockers below are unchanged. Live SMTP delivery, production infrastructure headers, proxy/TLS behavior, shared rate limiting, monitoring, backups, and external security testing were not verified in this local resume.
 
 ## Evidence
 
