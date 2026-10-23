@@ -53,7 +53,7 @@ export async function listInvitations(workspaceId: string) {
 }
 
 export async function createInvitation(workspaceId: string, email: string, role: 'admin' | 'member') {
-  return apiRequest<{ invitation: WorkspaceInvitation; delivery: { status: 'preview' | 'sent'; preview_url?: string } }>(`/api/workspaces/${workspaceId}/invitations`, { method: 'POST', body: JSON.stringify({ email, role }) })
+  return apiRequest<{ invitation: WorkspaceInvitation; delivery: { status: 'preview' | 'queued' | 'sent'; preview_url?: string } }>(`/api/workspaces/${workspaceId}/invitations`, { method: 'POST', body: JSON.stringify({ email, role }) })
 }
 
 export async function revokeInvitation(workspaceId: string, invitationId: string) {

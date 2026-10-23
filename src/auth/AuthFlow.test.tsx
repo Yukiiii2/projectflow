@@ -30,6 +30,7 @@ function emptyResponse(status: number) {
 const fetchMock = vi.fn<typeof fetch>()
 
 beforeEach(() => {
+  fetchMock.mockReset()
   vi.stubGlobal('fetch', fetchMock)
   window.history.replaceState({}, '', '/')
 })
@@ -41,6 +42,51 @@ afterEach(() => {
 })
 
 describe('frontend authentication integration', () => {
+  it('requests password recovery without revealing account existence', async () => {
+    const user = userEvent.setup()
+    fetchMock
+      .mockReturnValueOnce(jsonResponse(401, { error: 'Sign in required' }))
+      .mockReturnValueOnce(jsonResponse(202, { message: 'If an account matches that email, a reset link has been sent.' }))
+    render(<App />)
+
+    await user.click(await screen.findByRole('link', { name: 'Forgot password?' }))
+    await user.type(screen.getByLabelText('Email address'), 'jordan@example.com')
+    await user.click(screen.getByRole('button', { name: 'Send reset link' }))
+
+    expect(await screen.findByText('If an account matches that email, a reset link has been sent.')).toBeInTheDocument()
+    expect(fetchMock.mock.calls[1]?.[0]).toBe('http://localhost:4000/api/auth/password-reset/request')
+  })
+
+  it('validates and completes a password reset link', async () => {
+    const user = userEvent.setup()
+    window.history.replaceState({}, '', '/reset-password?token=valid-reset-token-with-more-than-32-characters')
+    fetchMock
+      .mockReturnValueOnce(jsonResponse(401, { error: 'Sign in required' }))
+      .mockReturnValueOnce(emptyResponse(204))
+    render(<App />)
+
+    await user.type(await screen.findByLabelText('New password'), 'a new correct horse battery staple')
+    await user.type(screen.getByLabelText('Confirm new password'), 'a new correct horse battery staple')
+    await user.click(screen.getByRole('button', { name: 'Reset password' }))
+
+    expect(await screen.findByText('Your password has been reset. Sign in with your new password.')).toBeInTheDocument()
+    expect(window.location.pathname).toBe('/login')
+  })
+
+  it('gates the application for an explicitly unverified account and resends verification', async () => {
+    const user = userEvent.setup()
+    fetchMock.mockImplementation((input) => String(input).endsWith('/api/auth/me')
+      ? jsonResponse(200, { user: { ...authenticatedUser, email_verified: false, email_verification_required: true } })
+      : jsonResponse(202, { message: 'Verification email requested.' }))
+    render(<App />)
+
+    expect(await screen.findByRole('heading', { name: 'Verify your email' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Dashboard' })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Resend verification email' }))
+    expect(await screen.findByText('Verification email requested.')).toBeInTheDocument()
+    expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith('/api/auth/email-verification/request'))).toBe(true)
+  })
+
   it('redirects unauthenticated private routes to sign in', async () => {
     fetchMock.mockReturnValueOnce(jsonResponse(401, { error: 'Sign in required' }))
     render(<App />)

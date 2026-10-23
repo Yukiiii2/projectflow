@@ -12,18 +12,19 @@ const origin = 'http://localhost:5173'
 const password = 'correct horse battery staple'
 const pools: Pool[] = []
 
-async function context() {
+async function context(emailOutbox?: Parameters<typeof createApp>[0]['emailOutbox']) {
   const memory = newDb({ autoCreateForeignKeyIndices: true })
   memory.public.registerFunction({ name: 'gen_random_uuid', returns: DataType.uuid, impure: true, implementation: randomUUID })
   const first = await readFile(fileURLToPath(new URL('../sql/001_init.sql', import.meta.url)), 'utf8')
   const collaboration = await readFile(fileURLToPath(new URL('../sql/002_collaboration.sql', import.meta.url)), 'utf8')
-  memory.public.none(`${first.replace('CREATE EXTENSION IF NOT EXISTS pgcrypto;', '')}\n${collaboration}`)
+  const accountSecurity = await readFile(fileURLToPath(new URL('../sql/003_account_security.sql', import.meta.url)), 'utf8')
+  memory.public.none(`${first.replace('CREATE EXTENSION IF NOT EXISTS pgcrypto;', '')}\n${collaboration}\n${accountSecurity}`)
   const adapter = memory.adapters.createPg()
   const pool = new adapter.Pool() as unknown as Pool
   pools.push(pool)
   return {
     pool,
-    app: createApp({ db: pool, sessionStore: new session.MemoryStore(), config: { frontendOrigin: origin, sessionSecret: 'test-session-secret-at-least-32-characters', production: false } }),
+    app: createApp({ db: pool, sessionStore: new session.MemoryStore(), emailOutbox, config: { frontendOrigin: origin, sessionSecret: 'test-session-secret-at-least-32-characters', production: false } }),
   }
 }
 

@@ -2205,6 +2205,7 @@ button:disabled {
   margin-bottom: 26px;
 }
 
+.auth-panel__heading h1,
 .auth-panel__heading h2 {
   margin: 0;
   font-size: 28px;
@@ -2361,6 +2362,31 @@ button:disabled {
   font-weight: 680;
   text-decoration-thickness: 1px;
   text-underline-offset: 3px;
+}
+
+.auth-forgot-link {
+  justify-self: end;
+  margin-top: -4px;
+  color: var(--purple-300);
+  font-size: 0.84rem;
+  font-weight: 650;
+}
+
+.auth-action-layout {
+  min-height: calc(100vh - 76px);
+  display: grid;
+  place-items: center;
+  padding: 40px 24px 72px;
+}
+
+.auth-action-panel {
+  width: min(100%, 480px);
+}
+
+.auth-alert.is-success {
+  color: var(--success);
+  border-color: color-mix(in srgb, var(--success) 34%, var(--border));
+  background: color-mix(in srgb, var(--success) 9%, var(--surface-card));
 }
 
 .workspace-page,
@@ -3050,6 +3076,7 @@ button:disabled {
     box-shadow: none;
   }
 
+  .auth-panel__heading h1,
   .auth-panel__heading h2 {
     font-size: 25px;
   }

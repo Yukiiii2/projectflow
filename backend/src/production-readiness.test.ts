@@ -1,0 +1,134 @@
+import { mkdtemp, rm, writeFile, mkdir } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import session from 'express-session'
+import request from 'supertest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { createApp } from './app.js'
+import { loadServerConfig } from './config.js'
+import { createLogger, redactLogValue } from './logger.js'
+
+const temporaryDirectories: string[] = []
+const outboxKey = Buffer.alloc(32, 7).toString('base64')
+
+afterEach(async () => {
+  await Promise.all(temporaryDirectories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })))
+})
+
+describe('production readiness configuration', () => {
+  it('accepts the same-origin TLS production configuration', () => {
+    const config = loadServerConfig({
+      NODE_ENV: 'production',
+      PORT: '10000',
+      DATABASE_URL: 'postgresql://projectflow:test-database-password@pooler.example.test/projectflow?sslmode=require',
+      SESSION_SECRET: 'a-production-session-secret-with-more-than-32-characters',
+      FRONTEND_ORIGIN: 'https://projectflow.example',
+      INVITATION_DELIVERY: 'smtp',
+      SMTP_HOST: 'smtp.resend.com',
+      SMTP_PORT: '465',
+      SMTP_USER: 'resend',
+      SMTP_PASSWORD: 'test-resend-secret-value',
+      INVITATION_FROM: 'ProjectFlow <invites@projectflow.example>',
+      REQUIRE_EMAIL_VERIFICATION: 'true',
+      TRUST_PROXY_HOPS: '1',
+      EMAIL_OUTBOX_KEY: outboxKey,
+    })
+
+    expect(config).toMatchObject({ production: true, port: 10000, trustProxyHops: 1, requireEmailVerification: true })
+  })
+
+  it.each([
+    ['http frontend', { FRONTEND_ORIGIN: 'http://projectflow.example' }, 'HTTPS'],
+    ['unencrypted database', { DATABASE_URL: 'postgresql://user:pass@db.example.test/projectflow' }, 'sslmode=require'],
+    ['preview email', { INVITATION_DELIVERY: 'preview' }, 'SMTP'],
+    ['disabled verification', { REQUIRE_EMAIL_VERIFICATION: 'false' }, 'email verification'],
+    ['invalid proxy hops', { TRUST_PROXY_HOPS: '0' }, 'TRUST_PROXY_HOPS'],
+    ['placeholder SMTP secret', { SMTP_PASSWORD: 'REPLACE_WITH_RESEND_API_KEY' }, 'placeholder'],
+    ['invalid outbox key', { EMAIL_OUTBOX_KEY: 'not-a-32-byte-key' }, 'EMAIL_OUTBOX_KEY'],
+  ])('rejects %s in production', (_label, override, message) => {
+    expect(() => loadServerConfig({
+      NODE_ENV: 'production',
+      DATABASE_URL: 'postgresql://user:pass@db.example.test/projectflow?sslmode=require',
+      SESSION_SECRET: 'a-production-session-secret-with-more-than-32-characters',
+      FRONTEND_ORIGIN: 'https://projectflow.example',
+      INVITATION_DELIVERY: 'smtp',
+      SMTP_HOST: 'smtp.resend.com',
+      SMTP_PORT: '465',
+      SMTP_USER: 'resend',
+      SMTP_PASSWORD: 'test-resend-secret-value',
+      INVITATION_FROM: 'ProjectFlow <invites@projectflow.example>',
+      REQUIRE_EMAIL_VERIFICATION: 'true',
+      TRUST_PROXY_HOPS: '1',
+      EMAIL_OUTBOX_KEY: outboxKey,
+      ...override,
+    })).toThrow(message)
+  })
+})
+
+describe('same-origin production app', () => {
+  it('serves Vite assets and SPA routes without shadowing API 404s', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'projectflow-static-'))
+    temporaryDirectories.push(directory)
+    await mkdir(join(directory, 'assets'))
+    await writeFile(join(directory, 'index.html'), '<!doctype html><title>ProjectFlow production</title>')
+    await writeFile(join(directory, 'assets', 'index-12345678.js'), 'console.log("built")')
+    const db = { query: vi.fn().mockResolvedValue({ rows: [{ '?column?': 1 }] }) } as never
+    const app = createApp({
+      db,
+      sessionStore: new session.MemoryStore(),
+      staticAssetsPath: directory,
+      invitationDelivery: { mode: 'smtp', async send() { return { status: 'sent' } }, async sendVerification() { return { status: 'sent' } }, async sendPasswordReset() { return { status: 'sent' } } },
+      config: {
+        frontendOrigin: 'https://projectflow.example',
+        sessionSecret: 'a-production-session-secret-with-more-than-32-characters',
+        production: true,
+        trustProxyHops: 1,
+        requireEmailVerification: true,
+      },
+    })
+
+    const page = await request(app).get('/projects/example').set('X-Forwarded-Proto', 'https').expect(200)
+    expect(page.text).toContain('ProjectFlow production')
+    expect(page.headers['cache-control']).toContain('no-cache')
+    expect(page.headers['content-security-policy']).toContain("default-src 'self'")
+    expect(page.headers['strict-transport-security']).toBeTruthy()
+    expect(page.headers['x-request-id']).toMatch(/^[0-9a-f-]{36}$/)
+
+    const asset = await request(app).get('/assets/index-12345678.js').set('X-Forwarded-Proto', 'https').expect(200)
+    expect(asset.headers['cache-control']).toContain('immutable')
+
+    await request(app).get('/api/does-not-exist').set('X-Forwarded-Proto', 'https').expect(404, { error: 'Route not found' })
+    await request(app).post('/api/does-not-exist').set('Origin', 'https://projectflow.example').set('X-Forwarded-Proto', 'http').expect(400, { error: 'HTTPS required' })
+  })
+
+  it('never redirects an insecure request to a request-controlled host', async () => {
+    const db = { query: vi.fn().mockResolvedValue({ rows: [] }) } as never
+    const app = createApp({
+      db,
+      sessionStore: new session.MemoryStore(),
+      invitationDelivery: { mode: 'smtp', async send() { return { status: 'sent' } }, async sendVerification() { return { status: 'sent' } }, async sendPasswordReset() { return { status: 'sent' } } },
+      config: {
+        frontendOrigin: 'https://projectflow.example',
+        sessionSecret: 'a-production-session-secret-with-more-than-32-characters',
+        production: true,
+      },
+    })
+
+    const response = await request(app).get('//attacker.example/redirect').set('X-Forwarded-Proto', 'http').expect(308)
+    expect(new URL(response.headers.location!).origin).toBe('https://projectflow.example')
+  })
+})
+
+describe('structured logging', () => {
+  it('redacts credentials, tokens, and sensitive URL segments', () => {
+    expect(redactLogValue('postgresql://user:secret@db.example.test/projectflow')).toBe('postgresql://[REDACTED]@db.example.test/projectflow')
+    expect(redactLogValue('/api/invitations/raw-token-value?token=another-secret')).toBe('/api/invitations/[REDACTED]')
+  })
+
+  it('writes one JSON object per event', () => {
+    const write = vi.fn()
+    const logger = createLogger({ level: 'info', write })
+    logger.info('server_started', { port: 4000 })
+    expect(JSON.parse(write.mock.calls[0]![0])).toMatchObject({ level: 'info', event: 'server_started', port: 4000 })
+  })
+})

@@ -15,7 +15,12 @@
     "project-task:qa": "node scripts/project-task-qa.mjs",
     "kanban:qa": "node scripts/kanban-qa.mjs",
     "collaboration:qa": "node scripts/collaboration-qa.mjs",
-    "stage-f:qa": "node scripts/stage-f-qa.mjs"
+    "stage-f:qa": "node scripts/stage-f-qa.mjs",
+    "build:all": "npm run build && npm --prefix backend run build",
+    "start": "npm --prefix backend start"
+  },
+  "engines": {
+    "node": ">=20"
   },
   "dependencies": {
     "@fontsource-variable/inter": "^5.3.0",

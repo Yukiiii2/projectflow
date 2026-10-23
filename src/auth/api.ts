@@ -3,6 +3,8 @@ export interface AuthUser {
   name: string
   email: string
   created_at?: string
+  email_verified?: boolean
+  email_verification_required?: boolean
 }
 
 interface AuthResponse {
@@ -13,7 +15,11 @@ interface ErrorResponse {
   error?: string
 }
 
-const apiBaseUrl = (import.meta.env.VITE_API_URL ?? 'http://localhost:4000').replace(/\/$/, '')
+export function resolveApiBaseUrl(configured: string | undefined, fallback: string) {
+  return (configured ?? fallback).replace(/\/$/, '')
+}
+
+const apiBaseUrl = resolveApiBaseUrl(import.meta.env.VITE_API_URL, import.meta.env.DEV ? 'http://localhost:4000' : '')
 export const sessionExpiredEvent = 'projectflow:session-expired'
 
 export class ApiError extends Error {
@@ -108,4 +114,29 @@ export async function signOut() {
     if (error instanceof ApiError && error.status === 401) return
     throw error
   }
+}
+
+export async function requestPasswordReset(email: string) {
+  return apiRequest<{ message: string }>('/api/auth/password-reset/request', {
+    method: 'POST',
+    body: JSON.stringify({ email }),
+  })
+}
+
+export async function confirmPasswordReset(token: string, password: string) {
+  await apiRequest<void>('/api/auth/password-reset/confirm', {
+    method: 'POST',
+    body: JSON.stringify({ token, password }),
+  }, { 400: 'This password reset link is invalid or has expired.' })
+}
+
+export async function requestEmailVerification() {
+  return apiRequest<{ message: string }>('/api/auth/email-verification/request', { method: 'POST' })
+}
+
+export async function confirmEmailVerification(token: string) {
+  return apiRequest<{ message: string }>('/api/auth/email-verification/confirm', {
+    method: 'POST',
+    body: JSON.stringify({ token }),
+  }, { 400: 'This verification link is invalid or has expired.' })
 }

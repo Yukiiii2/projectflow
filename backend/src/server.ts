@@ -1,18 +1,17 @@
 import 'dotenv/config';
 import connectPgSimple from 'connect-pg-simple';
 import session from 'express-session';
+import { fileURLToPath } from 'node:url';
 import { createApp } from './app.js';
-import { db } from './db.js';
+import { loadServerConfig } from './config.js';
+import { createDatabasePool } from './db.js';
+import { createEmailOutbox, startEmailOutboxWorker } from './email-outbox.js';
 import { invitationDeliveryFromEnv } from './invitation-delivery.js';
+import { createLogger } from './logger.js';
 
-const frontendOrigin = process.env.FRONTEND_ORIGIN ?? 'http://localhost:5173';
-const sessionSecret = process.env.SESSION_SECRET;
-if (!sessionSecret) throw new Error('SESSION_SECRET missing');
-
-const port = Number(process.env.PORT ?? 4000);
-if (!Number.isInteger(port) || port < 1 || port > 65535) {
-  throw new Error('PORT must be an integer from 1 to 65535');
-}
+const config = loadServerConfig(process.env);
+const logger = createLogger({ level: config.logLevel });
+const db = createDatabasePool(config.databaseUrl);
 
 try {
   await db.query('SELECT 1');
@@ -22,26 +21,40 @@ try {
 }
 
 const PgStore = connectPgSimple(session);
+const transportDelivery = invitationDeliveryFromEnv(config.production);
+const emailOutbox = config.production ? createEmailOutbox(config.emailOutboxKey!) : undefined;
 const app = createApp({
   db,
-  sessionStore: new PgStore({ pool: db, createTableIfMissing: true }),
-  invitationDelivery: invitationDeliveryFromEnv(process.env.NODE_ENV === 'production'),
+  sessionStore: new PgStore({ pool: db, createTableIfMissing: false }),
+  invitationDelivery: transportDelivery,
+  emailOutbox,
+  staticAssetsPath: config.production ? fileURLToPath(new URL('../../dist/', import.meta.url)) : undefined,
+  logger,
   config: {
-    frontendOrigin,
-    sessionSecret,
-    production: process.env.NODE_ENV === 'production',
-    invitationTtlHours: Number(process.env.INVITATION_TTL_HOURS ?? 168),
+    frontendOrigin: config.frontendOrigin,
+    sessionSecret: config.sessionSecret,
+    production: config.production,
+    invitationTtlHours: config.invitationTtlHours,
+    verificationTtlMinutes: config.verificationTtlMinutes,
+    passwordResetTtlMinutes: config.passwordResetTtlMinutes,
+    trustProxyHops: config.trustProxyHops,
+    requireEmailVerification: config.requireEmailVerification,
   },
 });
 
-const server = app.listen(port, () => {
-  console.log(`ProjectFlow API listening on http://localhost:${port}`);
+const server = app.listen(config.port, () => {
+  logger.info('server_started', { port: config.port, production: config.production });
 });
+const emailWorker = config.production ? startEmailOutboxWorker(db, transportDelivery, logger, config.emailOutboxKey!) : undefined;
 
 function shutdown(signal: string) {
-  console.log(`${signal} received; shutting down`);
+  logger.info('server_shutdown', { signal });
   server.close(() => {
-    void db.end().finally(() => process.exit(0));
+    void (async () => {
+      await emailWorker?.stop();
+      await db.end();
+      process.exit(0);
+    })();
   });
 }
 

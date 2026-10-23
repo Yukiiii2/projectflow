@@ -10,19 +10,37 @@ export interface InvitationMessage {
 }
 
 export interface InvitationDeliveryResult {
-  status: 'preview' | 'sent'
+  status: 'preview' | 'queued' | 'sent'
   preview_url?: string
+}
+
+export interface VerificationMessage {
+  recipient: string
+  name: string
+  expiresAt: string
+  verifyUrl: string
+}
+
+export interface PasswordResetMessage {
+  recipient: string
+  name: string
+  expiresAt: string
+  resetUrl: string
 }
 
 export interface InvitationDelivery {
   mode: 'preview' | 'smtp'
   send(message: InvitationMessage): Promise<InvitationDeliveryResult>
+  sendVerification(message: VerificationMessage): Promise<InvitationDeliveryResult>
+  sendPasswordReset(message: PasswordResetMessage): Promise<InvitationDeliveryResult>
 }
 
 export function previewInvitationDelivery(): InvitationDelivery {
   return {
     mode: 'preview',
     async send(message) { return { status: 'preview', preview_url: message.acceptUrl } },
+    async sendVerification(message) { return { status: 'preview', preview_url: message.verifyUrl } },
+    async sendPasswordReset(message) { return { status: 'preview', preview_url: message.resetUrl } },
   }
 }
 
@@ -42,21 +60,49 @@ export function invitationDeliveryFromEnv(production: boolean): InvitationDelive
   if (!host || !Number.isInteger(port) || !user || !pass || !from) {
     throw new Error('SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, and INVITATION_FROM are required for SMTP delivery')
   }
-  const transport = nodemailer.createTransport({ host, port, secure: port === 465, auth: { user, pass }, disableFileAccess: true, disableUrlAccess: true })
+  const transport = nodemailer.createTransport({
+    host,
+    port,
+    secure: port === 465,
+    auth: { user, pass },
+    connectionTimeout: 10_000,
+    greetingTimeout: 10_000,
+    socketTimeout: 20_000,
+    disableFileAccess: true,
+    disableUrlAccess: true,
+  })
+  async function deliver(recipient: string, subject: string, text: string, html: string) {
+    const result = await transport.sendMail({ from, to: recipient, subject: headerText(subject), text, html })
+    if (!result.accepted.map(String).some((accepted) => accepted.toLowerCase() === recipient.toLowerCase())) {
+      throw new Error('SMTP server did not accept the recipient')
+    }
+    return { status: 'sent' as const }
+  }
   return {
     mode: 'smtp',
     async send(message) {
-      const result = await transport.sendMail({
-        from,
-        to: message.recipient,
-        subject: `${headerText(message.inviterName)} invited you to ${headerText(message.workspaceName)}`,
-        text: `You were invited to join ${message.workspaceName} as ${message.role}. Accept before ${message.expiresAt}: ${message.acceptUrl}`,
-        html: `<p><strong>${escapeHtml(message.inviterName)}</strong> invited you to <strong>${escapeHtml(message.workspaceName)}</strong> as ${message.role}.</p><p><a href="${escapeHtml(message.acceptUrl)}">Accept invitation</a></p><p>This invitation expires ${escapeHtml(message.expiresAt)}.</p>`,
-      })
-      if (!result.accepted.map(String).some((recipient) => recipient.toLowerCase() === message.recipient.toLowerCase())) {
-        throw new Error('SMTP server did not accept the invitation recipient')
-      }
-      return { status: 'sent' }
+      return deliver(
+        message.recipient,
+        `${message.inviterName} invited you to ${message.workspaceName}`,
+        `You were invited to join ${message.workspaceName} as ${message.role}. Accept before ${message.expiresAt}: ${message.acceptUrl}`,
+        `<p><strong>${escapeHtml(message.inviterName)}</strong> invited you to <strong>${escapeHtml(message.workspaceName)}</strong> as ${message.role}.</p><p><a href="${escapeHtml(message.acceptUrl)}">Accept invitation</a></p><p>This invitation expires ${escapeHtml(message.expiresAt)}.</p>`,
+      )
+    },
+    async sendVerification(message) {
+      return deliver(
+        message.recipient,
+        'Verify your ProjectFlow email',
+        `Hello ${message.name}. Verify your email before ${message.expiresAt}: ${message.verifyUrl}`,
+        `<p>Hello ${escapeHtml(message.name)}.</p><p><a href="${escapeHtml(message.verifyUrl)}">Verify your ProjectFlow email</a></p><p>This link expires ${escapeHtml(message.expiresAt)}.</p>`,
+      )
+    },
+    async sendPasswordReset(message) {
+      return deliver(
+        message.recipient,
+        'Reset your ProjectFlow password',
+        `Hello ${message.name}. Reset your password before ${message.expiresAt}: ${message.resetUrl}`,
+        `<p>Hello ${escapeHtml(message.name)}.</p><p><a href="${escapeHtml(message.resetUrl)}">Reset your ProjectFlow password</a></p><p>This link expires ${escapeHtml(message.expiresAt)}. If you did not request this, you can ignore this email.</p>`,
+      )
     },
   }
 }

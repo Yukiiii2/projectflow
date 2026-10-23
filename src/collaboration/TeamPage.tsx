@@ -27,7 +27,7 @@ function InviteDialog({ workspaceId, actorRole, onClose, onCreated }: { workspac
   const [role, setRole] = useState<'admin' | 'member'>('member')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
-  const [delivery, setDelivery] = useState<{ status: 'preview' | 'sent'; preview_url?: string } | null>(null)
+  const [delivery, setDelivery] = useState<{ status: 'preview' | 'queued' | 'sent'; preview_url?: string } | null>(null)
   const [copied, setCopied] = useState(false)
   const dialogRef = useRef<HTMLElement>(null)
   const emailRef = useRef<HTMLInputElement>(null)
@@ -49,8 +49,8 @@ function InviteDialog({ workspaceId, actorRole, onClose, onCreated }: { workspac
       <header className="dialog-card__header"><div><h2 id="invite-dialog-title">Invite a teammate</h2><p>Create a secure, expiring workspace invitation.</p></div><button type="button" className="icon-button" aria-label="Close invite dialog" onClick={onClose}><X size={19} /></button></header>
       {delivery ? <div className="invite-result">
         <span className="invite-result__icon"><Check size={22} /></span>
-        <h3>{delivery.status === 'sent' ? 'Invitation sent' : 'Preview invitation ready'}</h3>
-        <p>{delivery.status === 'sent' ? `The mail server accepted the invitation for ${email}.` : 'Development preview mode did not send email. Share this local link with the test recipient.'}</p>
+        <h3>{delivery.status === 'sent' ? 'Invitation sent' : delivery.status === 'queued' ? 'Invitation queued' : 'Preview invitation ready'}</h3>
+        <p>{delivery.status === 'sent' ? `The mail server accepted the invitation for ${email}.` : delivery.status === 'queued' ? `ProjectFlow queued secure delivery to ${email}.` : 'Development preview mode did not send email. Share this local link with the test recipient.'}</p>
         {delivery.preview_url && <label className="preview-link"><span>Acceptance link</span><span><input readOnly value={delivery.preview_url} /><button type="button" aria-label="Copy invitation link" onClick={() => void navigator.clipboard?.writeText(delivery.preview_url!).then(() => setCopied(true))}>{copied ? <Check size={16} /> : <Copy size={16} />}</button></span></label>}
         <button className="button button--primary" type="button" onClick={onClose}>Done</button>
       </div> : <form className="management-form" noValidate onSubmit={(event) => void submit(event)}>

@@ -10,6 +10,7 @@ interface AuthContextValue {
   notice: string
   clearNotice: () => void
   retrySession: () => Promise<void>
+  refreshUser: () => Promise<AuthUser | null>
   expireSession: () => void
   login: (email: string, password: string) => Promise<void>
   createAccount: (name: string, email: string, password: string) => Promise<void>
@@ -80,6 +81,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     notice,
     clearNotice: () => setNotice(''),
     retrySession: () => loadSession(true),
+    refreshUser: async () => {
+      const restoredUser = await authApi.restoreSession()
+      setUser(restoredUser)
+      setStatus(restoredUser ? 'authenticated' : 'unauthenticated')
+      return restoredUser
+    },
     expireSession,
     login: async (email, password) => {
       const authenticatedUser = await authApi.signIn(email, password)

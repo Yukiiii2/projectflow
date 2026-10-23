@@ -6,7 +6,7 @@ import session from 'express-session';
 import { DataType, newDb } from 'pg-mem';
 import type { Pool } from 'pg';
 import request from 'supertest';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createApp } from './app.js';
 
 const origin = 'http://localhost:5173';
@@ -29,7 +29,8 @@ async function testContext() {
     fileURLToPath(new URL('../sql/002_collaboration.sql', import.meta.url)),
     'utf8',
   );
-  memory.public.none(`${migration.replace('CREATE EXTENSION IF NOT EXISTS pgcrypto;', '')}\n${collaboration}`);
+  const accountSecurity = await readFile(fileURLToPath(new URL('../sql/003_account_security.sql', import.meta.url)), 'utf8');
+  memory.public.none(`${migration.replace('CREATE EXTENSION IF NOT EXISTS pgcrypto;', '')}\n${collaboration}\n${accountSecurity}`);
   const adapter = memory.adapters.createPg();
   const pool = new adapter.Pool() as unknown as Pool;
   pools.push(pool);
@@ -63,6 +64,19 @@ describe('ProjectFlow API foundation', () => {
     await request(app).get('/api/health').expect(200, { status: 'ok' });
     await request(app).get('/api/auth/me').expect(401, { error: 'Sign in required' });
     await request(app).get('/api/workspaces').expect(401, { error: 'Sign in required' });
+  });
+
+  it('forwards session-version database failures to the API error handler', async () => {
+    const { app, pool } = await testContext();
+    const agent = request.agent(app);
+    await register(agent, 'database-error@example.com').expect(201);
+    const originalQuery = pool.query.bind(pool);
+    vi.spyOn(pool, 'query').mockImplementation((text: unknown, values?: unknown[]) => {
+      if (typeof text === 'string' && text.startsWith('SELECT session_version')) return Promise.reject(new Error('database unavailable'));
+      return originalQuery(text as never, values as never);
+    });
+
+    await agent.get('/api/workspaces').expect(500, { error: 'Internal server error' });
   });
 
   it('registers, hashes passwords, logs in and invalidates the session on logout', async () => {
@@ -163,7 +177,7 @@ describe('ProjectFlow API foundation', () => {
     const app = createApp({
       db: pool,
       sessionStore: new session.MemoryStore(),
-      invitationDelivery: { mode: 'smtp', async send() { return { status: 'sent' }; } },
+      invitationDelivery: { mode: 'smtp', async send() { return { status: 'sent' }; }, async sendVerification() { return { status: 'sent' }; }, async sendPasswordReset() { return { status: 'sent' }; } },
       config: {
         frontendOrigin: 'https://app.projectflow.example',
         sessionSecret: 'production-session-secret-at-least-32-characters',
@@ -193,7 +207,7 @@ describe('ProjectFlow API foundation', () => {
     expect(() => createApp({
       db: pool,
       sessionStore: new session.MemoryStore(),
-      invitationDelivery: { mode: 'smtp', async send() { return { status: 'sent' }; } },
+      invitationDelivery: { mode: 'smtp', async send() { return { status: 'sent' }; }, async sendVerification() { return { status: 'sent' }; }, async sendPasswordReset() { return { status: 'sent' }; } },
       config: {
         frontendOrigin: 'https://app.projectflow.example',
         sessionSecret: 'REPLACE_WITH_AT_LEAST_32_RANDOM_CHARACTERS',

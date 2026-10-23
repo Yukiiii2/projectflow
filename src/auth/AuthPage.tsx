@@ -122,6 +122,7 @@ export function AuthPage({ mode, theme, onToggleTheme }: AuthPageProps) {
   const [submitting, setSubmitting] = useState(false)
   const isRegister = mode === 'register'
   const state = location.state as { from?: string } | null
+  const routeMessage = (location.state as { message?: string } | null)?.message ?? ''
   const destination = state?.from?.startsWith('/') ? state.from : '/'
 
   const update = (field: FieldName, value: string) => {
@@ -184,10 +185,10 @@ export function AuthPage({ mode, theme, onToggleTheme }: AuthPageProps) {
             <p>{isRegister ? 'Start with your details. You can create a workspace next.' : 'Sign in to continue to your ProjectFlow workspace.'}</p>
           </div>
 
-          {(notice || formError) && (
-            <div className="auth-alert" role="alert">
-              <AlertCircle size={18} aria-hidden="true" />
-              <span>{formError || notice}</span>
+          {(notice || formError || routeMessage) && (
+            <div className={`auth-alert ${routeMessage && !formError && !notice ? 'is-success' : ''}`} role="alert">
+              {routeMessage && !formError && !notice ? <Check size={18} aria-hidden="true" /> : <AlertCircle size={18} aria-hidden="true" />}
+              <span>{formError || notice || routeMessage}</span>
               {notice.includes('reach') && <button type="button" onClick={() => void retrySession()}>Retry</button>}
               {notice && !formError && (
                 <button type="button" className="auth-alert__dismiss" aria-label="Dismiss message" onClick={clearNotice}>
@@ -219,6 +220,7 @@ export function AuthPage({ mode, theme, onToggleTheme }: AuthPageProps) {
               onChange={(value) => update('email', value)}
               onBlur={() => validateOne('email')}
             />
+            {!isRegister && <Link className="auth-forgot-link" to="/forgot-password">Forgot password?</Link>}
             <Field
               id="password"
               label="Password"

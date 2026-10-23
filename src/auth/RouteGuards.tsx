@@ -33,3 +33,9 @@ export function PublicOnlyRoute({ children }: { children: ReactNode }) {
   }
   return children
 }
+
+export function VerifiedRoute({ children }: { children: ReactNode }) {
+  const { user } = useAuth()
+  if (user?.email_verification_required && user.email_verified === false) return <Navigate to="/verify-email" replace />
+  return children
+}

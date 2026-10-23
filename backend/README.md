@@ -45,7 +45,7 @@ npm.cmd run db:migrate
 npm.cmd run dev
 ```
 
-The migration command runs every numbered SQL migration in order. Migration `002_collaboration.sql` adds invitation lifecycle records, task activity records, comment edit timestamps, and membership join timestamps without deleting existing data.
+The migration command checks every numbered SQL migration in order. It uses an advisory lock, one transaction per pending file, and a checksum ledger so repeat runs skip applied files and changed migration history is rejected. Migration `003_account_security.sql` adds verified-email state, session versions, and hashed authentication tokens without deleting existing data. Migration `004_runtime_operations.sql` tracks the session table, enforces one outstanding token per user/purpose, and creates the production email outbox so the runtime role does not need schema privileges.
 
 Local invitation delivery defaults to a preview link:
 
@@ -54,7 +54,7 @@ INVITATION_TTL_HOURS=168
 INVITATION_DELIVERY=preview
 ```
 
-Preview mode does not send an email. To test real delivery, set `INVITATION_DELIVERY=smtp` and configure `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, and `INVITATION_FROM`. Production mode rejects preview delivery. Invitation tokens are delivered to recipients while PostgreSQL stores only their SHA-256 hashes.
+Preview mode does not send an email. To test Resend delivery, set `INVITATION_DELIVERY=smtp`, use `smtp.resend.com`, port `465`, user `resend`, a Resend API key as `SMTP_PASSWORD`, and a verified `INVITATION_FROM`. Production rejects preview delivery. Production requests atomically place invitation, verification, and reset messages in a PostgreSQL outbox with their source records. AES-256-GCM protects queued payloads using `EMAIL_OUTBOX_KEY`; the worker uses bounded SMTP timeouts and deletes successful, expired, or five-times-failed rows. Authentication token tables store only SHA-256 hashes.
 
 The API defaults to `http://localhost:4000`. Confirm database-backed health from another PowerShell window:
 
@@ -74,11 +74,11 @@ npm.cmd run build
 npm.cmd audit --omit=dev
 ```
 
-The integration tests use an isolated in-memory PostgreSQL-compatible database and a memory session store. They cover authentication, Argon2id storage, session cookies, authentication throttling, origin checks, 64 KB JSON limits, safe parser errors, production configuration, workspace isolation, project/task permissions, invitation lifecycle and email matching, role boundaries, comment ownership and moderation, member-removal assignment cleanup, and activity isolation. `verify:auth:live` exercises authentication against the running API and configured local PostgreSQL database, then removes its unique test account and session rows. The frontend browser QA scripts exercise complete workflows with temporary records and clean them up afterward.
+The integration tests use an isolated in-memory PostgreSQL-compatible database and a memory session store. They cover authentication, Argon2id storage, session cookies, authentication throttling, origin checks, 64 KB JSON limits, safe parser errors, production configuration, workspace isolation, project/task permissions, invitation lifecycle and email matching, role boundaries, comment ownership and moderation, member-removal assignment cleanup, activity isolation, token concurrency, outbox delivery, and migration cleanup. `verify:migrations:postgres` exercises concurrent migration runners against PostgreSQL. `verify:auth:live` and `verify:readiness:live` use unique temporary records and clean them up. The frontend browser QA scripts exercise complete workflows with temporary records and clean them up afterward.
 
 ## Browser behavior
 
-Write requests must carry the exact `Origin` configured by `FRONTEND_ORIGIN`, which defaults to `http://localhost:5173`. Browser requests must use `credentials: 'include'` to send the session cookie. Production mode requires an HTTPS frontend origin, SMTP invitation delivery, a non-placeholder session secret, and a Secure/HttpOnly/SameSite=Lax `__Host-projectflow.sid` cookie. Failed logins are limited to 10 per 15 minutes per client IP; registrations are limited to 20 per hour. The default in-memory limiter store must be replaced by a shared store before horizontally scaled deployment.
+Write requests must carry the exact `Origin` configured by `FRONTEND_ORIGIN`, which defaults to `http://localhost:5173`. Cross-site Fetch Metadata is rejected. Browser requests use `credentials: 'include'`. Production requires an HTTPS origin, a TLS PostgreSQL URL, SMTP delivery, email verification, a non-placeholder session secret, a known proxy-hop count, and a Secure/HttpOnly/SameSite=Lax `__Host-projectflow.sid` cookie. Failed logins are limited to 10 per 15 minutes per client IP; registrations are limited to 20 per hour; recovery routes are limited to 10 per 15 minutes. Replace the in-memory limiter store before horizontal scaling.
 
 ## Current API
 
@@ -87,6 +87,10 @@ Write requests must carry the exact `Origin` configured by `FRONTEND_ORIGIN`, wh
 - `POST /api/auth/login` with `{email,password}`
 - `POST /api/auth/logout`
 - `GET /api/auth/me`
+- `POST /api/auth/email-verification/request`
+- `POST /api/auth/email-verification/confirm` with `{token}`
+- `POST /api/auth/password-reset/request` with `{email}`; always returns the same accepted response
+- `POST /api/auth/password-reset/confirm` with `{token,password}`
 - `GET /api/workspaces`
 - `POST /api/workspaces` with `{name}`
 - `GET /api/workspaces/:wid/projects`
@@ -111,4 +115,4 @@ Write requests must carry the exact `Origin` configured by `FRONTEND_ORIGIN`, wh
 - `DELETE /api/comments/:cid` for the author or a workspace owner/admin
 - `GET /api/tasks/:tid/activity`
 
-Workspace access is enforced server-side using membership joins, and inaccessible cross-workspace resources return 404. Owners may manage admins and members; admins may invite, revoke, and remove members; owners cannot be reassigned or removed. Password reset, email verification, ownership transfer, distributed throttling, production mail-provider verification, deployment-header configuration, and broader security review remain required before a public launch.
+Workspace access is enforced server-side using membership joins, and inaccessible cross-workspace resources return 404. Owners may manage admins and members; admins may invite, revoke, and remove members; owners cannot be reassigned or removed. Ownership transfer, distributed throttling, live provider verification, backup/restore rehearsal, hosted proxy/TLS validation, and an external security review remain required before a public launch.

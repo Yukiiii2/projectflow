@@ -3,7 +3,8 @@ import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import { BrowserRouter, Navigate, Outlet, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { AuthProvider, useAuth } from './auth/AuthContext'
 import { AuthPage } from './auth/AuthPage'
-import { ProtectedRoute, PublicOnlyRoute } from './auth/RouteGuards'
+import { ForgotPasswordPage, ResetPasswordPage, VerifyEmailPage } from './auth/AccountRecoveryPage'
+import { ProtectedRoute, PublicOnlyRoute, VerifiedRoute } from './auth/RouteGuards'
 import { AppShell } from './components/AppShell'
 import { Dashboard } from './components/Dashboard'
 import { InvitationAcceptPage } from './collaboration/InvitationAcceptPage'
@@ -149,7 +150,7 @@ function KanbanRoute() {
 }
 
 function ProtectedApplication({ theme, onToggleTheme }: { theme: Theme; onToggleTheme: () => void }) {
-  return <ProtectedRoute><WorkspaceGate theme={theme} onToggleTheme={onToggleTheme}><ProjectsProvider><ApplicationExperience theme={theme} onToggleTheme={onToggleTheme} /></ProjectsProvider></WorkspaceGate></ProtectedRoute>
+  return <ProtectedRoute><VerifiedRoute><WorkspaceGate theme={theme} onToggleTheme={onToggleTheme}><ProjectsProvider><ApplicationExperience theme={theme} onToggleTheme={onToggleTheme} /></ProjectsProvider></WorkspaceGate></VerifiedRoute></ProtectedRoute>
 }
 
 export function App() {
@@ -164,8 +165,11 @@ export function App() {
   return <BrowserRouter><AuthProvider><WorkspaceProvider><Routes>
     <Route path="/login" element={<PublicOnlyRoute><AuthPage key="login" mode="login" theme={theme} onToggleTheme={toggleTheme} /></PublicOnlyRoute>} />
     <Route path="/register" element={<PublicOnlyRoute><AuthPage key="register" mode="register" theme={theme} onToggleTheme={toggleTheme} /></PublicOnlyRoute>} />
-    <Route path="/workspaces/new" element={<ProtectedRoute><WorkspaceGate theme={theme} onToggleTheme={toggleTheme}><WorkspaceSetup theme={theme} onToggleTheme={toggleTheme} /></WorkspaceGate></ProtectedRoute>} />
-    <Route path="/invite/:token" element={<ProtectedRoute><InvitationAcceptPage /></ProtectedRoute>} />
+    <Route path="/forgot-password" element={<PublicOnlyRoute><ForgotPasswordPage theme={theme} onToggleTheme={toggleTheme} /></PublicOnlyRoute>} />
+    <Route path="/reset-password" element={<ResetPasswordPage theme={theme} onToggleTheme={toggleTheme} />} />
+    <Route path="/verify-email" element={<VerifyEmailPage theme={theme} onToggleTheme={toggleTheme} />} />
+    <Route path="/workspaces/new" element={<ProtectedRoute><VerifiedRoute><WorkspaceGate theme={theme} onToggleTheme={toggleTheme}><WorkspaceSetup theme={theme} onToggleTheme={toggleTheme} /></WorkspaceGate></VerifiedRoute></ProtectedRoute>} />
+    <Route path="/invite/:token" element={<ProtectedRoute><VerifiedRoute><InvitationAcceptPage /></VerifiedRoute></ProtectedRoute>} />
     <Route element={<ProtectedApplication theme={theme} onToggleTheme={toggleTheme} />}>
       <Route index element={<DashboardRoute />} />
       <Route path="projects" element={<ProjectsPage />} />

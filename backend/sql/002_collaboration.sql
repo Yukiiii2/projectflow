@@ -1,5 +1,3 @@
-BEGIN;
-
 ALTER TABLE comments ADD COLUMN IF NOT EXISTS edited_at TIMESTAMPTZ;
 ALTER TABLE workspace_members ADD COLUMN IF NOT EXISTS joined_at TIMESTAMPTZ NOT NULL DEFAULT now();
 
@@ -34,5 +32,3 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_workspace_invitations_pending
  WHERE accepted_at IS NULL AND revoked_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_activity_workspace ON activity_events(workspace_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_activity_task ON activity_events(task_id, created_at DESC);
-
-COMMIT;

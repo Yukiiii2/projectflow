@@ -3,6 +3,7 @@ import type { Express, NextFunction, Request, Response } from 'express'
 import type { Pool } from 'pg'
 import { z } from 'zod'
 import type { InvitationDelivery } from './invitation-delivery.js'
+import type { EmailOutbox } from './email-outbox.js'
 
 type AsyncHandler = (req: Request, res: Response) => Promise<unknown>
 type Membership = (userId: string, workspaceId: string) => Promise<string | undefined>
@@ -15,6 +16,7 @@ interface CollaborationOptions {
   membership: Membership
   projectAccess: ProjectAccess
   delivery: InvitationDelivery
+  emailOutbox?: EmailOutbox
   frontendOrigin: string
   invitationTtlHours: number
 }
@@ -48,7 +50,7 @@ export async function recordActivity(db: Pool, input: {
 }
 
 export function registerCollaborationRoutes(app: Express, options: CollaborationOptions) {
-  const { db, requireUser, wrap, membership, projectAccess, delivery, frontendOrigin, invitationTtlHours } = options
+  const { db, requireUser, wrap, membership, projectAccess, delivery, emailOutbox, frontendOrigin, invitationTtlHours } = options
 
   async function actorRole(req: Request, res: Response, workspaceId: string) {
     const role = await membership(req.session.userId!, workspaceId)
@@ -84,24 +86,40 @@ export function registerCollaborationRoutes(app: Express, options: Collaboration
     const token = randomBytes(32).toString('base64url')
     const tokenHash = createHash('sha256').update(token).digest('hex')
     const expiresAt = new Date(Date.now() + invitationTtlHours * 60 * 60 * 1000)
-    const created = await db.query<{ id: string }>('INSERT INTO workspace_invitations(workspace_id,email,role,token_hash,invited_by,expires_at) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id', [workspaceId, body.email, body.role, tokenHash, req.session.userId, expiresAt])
-    const details = await db.query(`SELECT i.id,i.workspace_id,i.email,i.role,i.created_at,i.expires_at,i.accepted_at,i.revoked_at,
-      ${invitationStatusSql} AS status,u.id AS invited_by_id,u.name AS invited_by_name,w.name AS workspace_name
-      FROM workspace_invitations i JOIN users u ON u.id=i.invited_by JOIN workspaces w ON w.id=i.workspace_id WHERE i.id=$1`, [created.rows[0]!.id])
-    const invitation = details.rows[0]!
+    const message = (invitation: Record<string, unknown>) => ({
+      recipient: body.email,
+      inviterName: String(invitation.invited_by_name),
+      workspaceName: String(invitation.workspace_name),
+      role: body.role,
+      expiresAt: expiresAt.toISOString(),
+      acceptUrl: `${frontendOrigin}/invite/${token}`,
+    })
+    const client = await db.connect()
+    let createdId: string
+    let invitation: Record<string, unknown>
     try {
-      const deliveryResult = await delivery.send({
-        recipient: body.email,
-        inviterName: String(invitation.invited_by_name),
-        workspaceName: String(invitation.workspace_name),
-        role: body.role,
-        expiresAt: expiresAt.toISOString(),
-        acceptUrl: `${frontendOrigin}/invite/${token}`,
-      })
+      await client.query('BEGIN')
+      const created = await client.query<{ id: string }>('INSERT INTO workspace_invitations(workspace_id,email,role,token_hash,invited_by,expires_at) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id', [workspaceId, body.email, body.role, tokenHash, req.session.userId, expiresAt])
+      createdId = created.rows[0]!.id
+      const details = await client.query(`SELECT i.id,i.workspace_id,i.email,i.role,i.created_at,i.expires_at,i.accepted_at,i.revoked_at,
+        ${invitationStatusSql} AS status,u.id AS invited_by_id,u.name AS invited_by_name,w.name AS workspace_name
+        FROM workspace_invitations i JOIN users u ON u.id=i.invited_by JOIN workspaces w ON w.id=i.workspace_id WHERE i.id=$1`, [createdId])
+      invitation = details.rows[0]!
+      if (emailOutbox) await emailOutbox.enqueue(client, 'invitation', message(invitation))
+      await client.query('COMMIT')
+    } catch (error) {
+      try { await client.query('ROLLBACK') } catch { /* preserve the source error */ }
+      throw error
+    } finally {
+      client.release()
+    }
+
+    try {
+      const deliveryResult = emailOutbox ? { status: 'queued' as const } : await delivery.send(message(invitation))
       const { workspace_name: _workspaceName, ...safeInvitation } = invitation
       res.status(201).json({ invitation: safeInvitation, delivery: deliveryResult })
     } catch {
-      await db.query('UPDATE workspace_invitations SET revoked_at=now() WHERE id=$1', [created.rows[0]!.id])
+      await db.query('UPDATE workspace_invitations SET revoked_at=now() WHERE id=$1', [createdId])
       res.status(502).json({ error: 'Invitation delivery failed. No active invitation was created.' })
     }
   }))
