@@ -124,11 +124,21 @@ describe('ProjectFlow API foundation', () => {
       .send({ name: 'Maya Chen', email: 'maya@northstar.studio', password })
       .expect(403, { error: 'Origin not allowed' });
 
-    await agent
+    const invalidRegistration = await agent
       .post('/api/auth/register')
       .set('Origin', origin)
       .send({ name: 'Maya Chen', email: 'not-an-email', password: 'short' })
       .expect(400);
+    expect(invalidRegistration.body).toMatchObject({
+      error: 'Invalid request',
+      details: {
+        formErrors: [],
+        fieldErrors: {
+          email: [expect.any(String)],
+          password: [expect.any(String)],
+        },
+      },
+    });
 
     await agent
       .post('/api/auth/login')
@@ -272,14 +282,15 @@ describe('ProjectFlow API foundation', () => {
     const taskResponse = await owner
       .post(`/api/projects/${projectId}/tasks`)
       .set('Origin', origin)
-      .send({ title: 'Review homepage wireframes', dueDate: '2026-10-23' })
+      .send({ title: 'Review homepage wireframes', description: 'Preserve this description', priority: 'high', dueDate: '2026-10-23' })
       .expect(201);
     const taskId = taskResponse.body.task.id as string;
     expect(taskResponse.body.task).toMatchObject({
       project_id: projectId,
       project_name: 'Website refresh',
       status: 'todo',
-      priority: 'medium',
+      description: 'Preserve this description',
+      priority: 'high',
       due_date: '2026-10-23',
     });
 
@@ -290,11 +301,16 @@ describe('ProjectFlow API foundation', () => {
     const projectWithDueDate = await owner.get(`/api/projects/${projectId}`).expect(200);
     expect(projectWithDueDate.body.project.next_due_date).toBe('2026-10-23');
 
-    await owner
+    const updatedTask = await owner
       .patch(`/api/tasks/${taskId}`)
       .set('Origin', origin)
       .send({ status: 'in_progress' })
       .expect(200);
+    expect(updatedTask.body.task).toMatchObject({
+      status: 'in_progress',
+      description: 'Preserve this description',
+      priority: 'high',
+    });
     await owner
       .post(`/api/tasks/${taskId}/comments`)
       .set('Origin', origin)

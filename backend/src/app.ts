@@ -44,14 +44,23 @@ const projectUpdateSchema = z.object({
   description: z.string().max(5000).optional(),
   archived: z.literal(true).optional(),
 }).strict().refine((value) => Object.keys(value).length > 0, 'No fields provided');
-const taskSchema = z.object({
+const taskShape = {
   title: z.string().trim().min(1).max(200),
-  description: z.string().max(10000).optional().default(''),
-  status: z.enum(['todo', 'in_progress', 'done']).optional().default('todo'),
-  priority: z.enum(['low', 'medium', 'high']).optional().default('medium'),
-  dueDate: validDate.nullable().optional(),
-  assigneeId: id.nullable().optional(),
+  description: z.string().max(10000),
+  status: z.enum(['todo', 'in_progress', 'done']),
+  priority: z.enum(['low', 'medium', 'high']),
+  dueDate: validDate.nullable(),
+  assigneeId: id.nullable(),
+};
+const taskSchema = z.object({
+  ...taskShape,
+  description: taskShape.description.optional().default(''),
+  status: taskShape.status.optional().default('todo'),
+  priority: taskShape.priority.optional().default('medium'),
+  dueDate: taskShape.dueDate.optional(),
+  assigneeId: taskShape.assigneeId.optional(),
 }).strict();
+const taskUpdateSchema = z.object(taskShape).partial().strict();
 const wrap = (handler: (req: Request, res: Response) => Promise<unknown>) =>
   (req: Request, res: Response, next: NextFunction) => { Promise.resolve(handler(req, res)).catch(next); };
 const malformedJson = (error: unknown): error is SyntaxError & { status: number; body: unknown } =>
@@ -421,7 +430,7 @@ export function createApp({ db, sessionStore, config, invitationDelivery = previ
     const taskId = id.parse(req.params.tid); const task = await db.query<{ project_id: string; status: string; priority: string; assignee_id: string | null }>('SELECT project_id,status,priority,assignee_id FROM tasks WHERE id=$1', [taskId]);
     const access = task.rows[0] ? await projectAccess(req.session.userId!, task.rows[0].project_id) : undefined;
     if (!task.rows[0] || !access) { res.status(404).json({ error: 'Task not found' }); return; }
-    const updates = taskSchema.partial().parse(req.body);
+    const updates = taskUpdateSchema.parse(req.body);
     if (!Object.keys(updates).length) { res.status(400).json({ error: 'No fields provided' }); return; }
     if (!(await validAssignee(access.workspace_id, updates.assigneeId))) { res.status(400).json({ error: 'Assignee must be a workspace member' }); return; }
     const columns: Record<string, string> = { title: 'title', description: 'description', status: 'status', priority: 'priority', dueDate: 'due_date', assigneeId: 'assignee_id' };
@@ -449,7 +458,7 @@ export function createApp({ db, sessionStore, config, invitationDelivery = previ
     app.use((_req, res) => res.status(404).json({ error: 'Route not found' }));
   }
   app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
-    if (error instanceof ZodError) { res.status(400).json({ error: 'Invalid request', details: error.flatten() }); return; }
+    if (error instanceof ZodError) { res.status(400).json({ error: 'Invalid request', details: z.flattenError(error) }); return; }
     if (malformedJson(error)) { res.status(400).json({ error: 'Invalid JSON body' }); return; }
     if (oversizedBody(error)) { res.status(413).json({ error: 'Request body is too large' }); return; }
     logger.error('request_failed', { errorName: error instanceof Error ? error.name : 'UnknownError' });

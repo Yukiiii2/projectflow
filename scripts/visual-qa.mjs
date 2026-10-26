@@ -3,10 +3,32 @@ import path from 'node:path'
 import { chromium } from 'playwright-core'
 import AxeBuilder from '@axe-core/playwright'
 
-const baseUrl = process.env.PROJECTFLOW_URL ?? 'http://127.0.0.1:4173/'
+const baseUrl = process.env.PROJECTFLOW_URL ?? 'http://localhost:5173/'
 const edgePath = 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe'
 const outputDir = path.resolve('artifacts/screenshots')
 await mkdir(outputDir, { recursive: true })
+
+const visualMember = { id: 'visual-qa', name: 'Maya Chen', email: 'maya@northstar.studio', role: 'owner' }
+const visualProjects = {
+  northstar: [
+    { id: 'northstar-website', workspace_id: 'northstar', name: 'Website redesign', description: 'Website delivery plan.', created_at: '2026-10-01T00:00:00.000Z', archived_at: null, task_count: 48, completed_task_count: 36, next_due_date: '2026-10-23' },
+    { id: 'northstar-portal', workspace_id: 'northstar', name: 'Client portal', description: 'Portal delivery plan.', created_at: '2026-10-02T00:00:00.000Z', archived_at: null, task_count: 36, completed_task_count: 28, next_due_date: '2026-10-28' },
+    { id: 'northstar-mobile', workspace_id: 'northstar', name: 'Mobile app', description: 'Mobile delivery plan.', created_at: '2026-10-03T00:00:00.000Z', archived_at: null, task_count: 32, completed_task_count: 24, next_due_date: '2026-10-30' },
+    { id: 'northstar-brand', workspace_id: 'northstar', name: 'Brand system', description: 'Brand delivery plan.', created_at: '2026-10-04T00:00:00.000Z', archived_at: null, task_count: 12, completed_task_count: 8, next_due_date: '2026-10-21' },
+  ],
+  harbor: [
+    { id: 'harbor-research', workspace_id: 'harbor', name: 'Research hub', description: 'Research delivery plan.', created_at: '2026-10-01T00:00:00.000Z', archived_at: null, task_count: 24, completed_task_count: 18, next_due_date: '2026-10-25' },
+    { id: 'harbor-billing', workspace_id: 'harbor', name: 'Billing refresh', description: 'Billing delivery plan.', created_at: '2026-10-02T00:00:00.000Z', archived_at: null, task_count: 28, completed_task_count: 21, next_due_date: '2026-11-02' },
+    { id: 'harbor-release', workspace_id: 'harbor', name: 'Release site', description: 'Release delivery plan.', created_at: '2026-10-03T00:00:00.000Z', archived_at: null, task_count: 20, completed_task_count: 15, next_due_date: '2026-11-06' },
+  ],
+}
+
+function visualTasks(workspaceId) {
+  const project = visualProjects[workspaceId][0]
+  return [
+    { id: `${workspaceId}-task`, project_id: project.id, workspace_id: workspaceId, project_name: project.name, title: workspaceId === 'harbor' ? 'Share research summary' : 'Review homepage wireframes', description: 'Current visual QA fixture.', status: 'in_progress', priority: 'high', due_date: '2026-10-27', assignee_id: visualMember.id, assignee_name: visualMember.name, assignee_email: visualMember.email, created_at: '2026-10-10T00:00:00.000Z', updated_at: '2026-10-20T00:00:00.000Z' },
+  ]
+}
 
 const browser = await chromium.launch({ executablePath: edgePath, headless: true })
 const results = []
@@ -96,6 +118,18 @@ async function openPage(viewport) {
       ],
     }),
   }))
+  await page.route(/\/api\/workspaces\/([^/]+)\/(projects|tasks|members)$/, (route) => {
+    const match = new URL(route.request().url()).pathname.match(/\/api\/workspaces\/([^/]+)\/(projects|tasks|members)$/)
+    const workspaceId = match?.[1]
+    const resource = match?.[2]
+    if (!workspaceId || !resource || !(workspaceId in visualProjects)) return route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ error: 'Workspace not found' }) })
+    const body = resource === 'projects'
+      ? { projects: visualProjects[workspaceId] }
+      : resource === 'tasks'
+        ? { tasks: visualTasks(workspaceId) }
+        : { members: [visualMember] }
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) })
+  })
   const errors = []
   page.on('pageerror', (error) => errors.push(`pageerror: ${error.message}`))
   page.on('console', (message) => {
