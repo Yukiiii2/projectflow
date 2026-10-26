@@ -219,7 +219,7 @@ Completed and locally verified:
 
 ## Deployment readiness
 
-The approved target is one Render web service serving both Express `/api` routes and the compiled Vite application, with Neon PostgreSQL and Resend SMTP. The committed `render.yaml` keeps automatic deploys off and contains no credentials. GitHub Actions runs frontend/backend tests, three backend timezone variants, a real PostgreSQL concurrent-migration check, typechecks, builds, and high-severity dependency audits.
+The approved target is one Render web service serving both Express `/api` routes and the compiled Vite application, with Neon PostgreSQL and Resend SMTP. The committed `render.yaml` keeps automatic deploys off and contains no credentials. GitHub Actions runs frontend/backend tests, three backend timezone variants, typechecks, builds, high-severity dependency audits, a real PostgreSQL concurrent-migration check, and an isolated `pg_dump`/`pg_restore` recovery rehearsal with a failed-migration rollback probe.
 
 Read [the deployment runbook](./docs/DEPLOYMENT-RUNBOOK.md) and [database recovery procedure](./docs/DATABASE-RECOVERY.md) before creating resources. A hosted deployment still requires explicit approval.
 
@@ -229,7 +229,7 @@ Read [the deployment runbook](./docs/DEPLOYMENT-RUNBOOK.md) and [database recove
 - Resend-compatible SMTP transport is implemented, but live provider delivery, sender DNS, bounce handling, and account recovery email receipt have not been verified.
 - Rate limits use process memory and require a shared store for multiple API instances.
 - Local production configuration, CSP/HSTS, proxy assumptions, TLS database validation, migration safety, and structured redacted logs are implemented; their behavior through Render and Neon remains a hosted verification gate.
-- Workspace ownership transfer, distributed throttling, automated backup exports, hosted restore rehearsal, and external security testing remain outstanding.
+- Workspace ownership transfer, distributed throttling, production backup scheduling/storage, hosted Neon restore rehearsal, and external security testing remain outstanding. The equivalent local and CI logical restore path is automated and verified.
 - Real-time updates, advanced search, notifications, calendar views, advanced analytics, and customizable workflows are outside the current release.
 
 ## Roadmap

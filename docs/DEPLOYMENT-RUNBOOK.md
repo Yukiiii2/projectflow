@@ -17,14 +17,18 @@ This runbook prepares the approved single-service architecture. It does not auth
 3. Confirm the production bundle contains no `http://localhost:4000`, `Preview state`, secrets, or `.env` content.
 4. Confirm `render.yaml` contains only placeholders and non-secret configuration.
 5. Rehearse the database procedure in [DATABASE-RECOVERY.md](./DATABASE-RECOVERY.md).
+6. Confirm the CI PostgreSQL job completed both concurrent migration verification and the isolated `pg_dump`/`pg_restore` recovery rehearsal.
+7. Record the exact reviewed commit. Do not deploy a moving branch or an unreviewed working tree.
 
 ## Provider preparation requiring approval
 
-1. Create a Neon project in the region nearest Render Singapore.
-2. Copy the **pooled** connection string and confirm it ends with `sslmode=require` or a stronger verification mode.
-3. Create a Resend account, approve a sending domain, and publish its SPF/DKIM records.
-4. Create a Render Blueprint from this repository. Review the proposed Starter service before applying it.
-5. Keep automatic deploys disabled.
+1. Create a Neon project in the region nearest Render Singapore. Protect the production branch, choose and record history retention, define connection limits, and use separate runtime/migration roles where the selected plan supports them.
+2. Copy the **pooled** connection string and confirm it ends with `sslmode=require` or a stronger verification mode. Keep the direct endpoint available only for provider operations that explicitly require it.
+3. Create a Neon snapshot or recovery branch, restore it to a separate branch, and complete the database runbook before accepting non-recreatable data.
+4. Create a Resend account, approve a sending domain, and publish the exact SPF/DKIM records Resend provides. Create a sending-only key restricted to the production domain where available; Resend supports sending-scoped API keys ([Resend API key permissions](https://resend.com/changelog/new-api-key-permissions)).
+5. Confirm the sender identity matches `INVITATION_FROM`, then test SMTP through `smtp.resend.com:465` using implicit TLS. Resend documents `465` as its recommended SMTP port ([Resend SMTP](https://www.resend.com/changelog/smtp-service)).
+6. Create a Render Blueprint from this repository. Review the proposed Starter service, build/start commands, `/api/health`, environment values, region, and plan before applying it.
+7. Keep automatic deploys disabled. Render supports waiting for CI checks before automatic deploys, but enable that only after the first manual release and rollback rehearsal pass ([Render deploys](https://render.com/docs/deploys)).
 
 ## Render variables
 
@@ -64,6 +68,8 @@ Drain or deliberately purge the outbox before rotating `EMAIL_OUTBOX_KEY`; queue
 - Secrets: rotate the affected credential in its provider and Render. Rotating `SESSION_SECRET` invalidates all sessions.
 - Email: revoke the Resend key, issue a new least-privilege key, and verify delivery before re-enabling public actions.
 
+Database migrations remain a protected operator step. `render.yaml` deliberately does not run them at application startup or automatically on every instance. A Render pre-deploy command is supported for migrations on eligible services, but it should not be enabled until the hosted backup/restore rehearsal and migration-role permissions are verified; a failed pre-deploy command prevents the new release from replacing the current one ([Render pre-deploy commands](https://render.com/docs/deploys)).
+
 ## Monitoring and maintenance
 
 - Alert on failed health checks, deploy failures, repeated 5xx responses, unusual 401/403/429 volume, database limits, and email delivery failures.
@@ -72,3 +78,33 @@ Drain or deliberately purge the outbox before rotating `EMAIL_OUTBOX_KEY`; queue
 - Keep one API instance while rate limits use memory. Add a shared Redis-compatible rate-limit store before horizontal scaling.
 - Remove expired sessions and auth tokens on a scheduled maintenance job after hosted behavior is established.
 - Review dependency alerts weekly and repeat the security/browser workflow after cookie, proxy, CSP, authentication, or infrastructure changes.
+
+### Minimum alert routing
+
+| Signal | Source | Initial threshold | Required response |
+| --- | --- | --- | --- |
+| `/api/health` unavailable | External HTTPS probe and Render | Two consecutive failures; tune after observing hosted behavior | Page the application owner, inspect deploy/database state, pause releases |
+| Deploy/build/pre-deploy failure | Render | Any failure | Keep prior release active, review logs, do not bypass migration checks |
+| Repeated 5xx or `request_failed` | Structured application logs | Alert on a sustained cluster, not a single expected test error | Correlate by request ID; inspect sanitized error class and route |
+| `email_outbox_delivery_abandoned` | Structured application logs | Any event | Check Resend/provider status and affected message kind; never log the recipient or bearer URL |
+| Abnormal 401/403/429 volume | Structured application logs | Baseline-dependent | Check abuse, proxy IP attribution, and limiter behavior |
+| Connection/storage/compute pressure | Neon | Provider warning threshold | Reduce load or raise capacity; verify pool and long-running queries |
+| Bounce/complaint/suppression spike | Resend | Any provider warning or material increase | Pause affected mail, inspect sender/domain reputation and recipient policy |
+
+Assign one named owner and one fallback contact for application, database, and email alerts before launch. Confirm test alerts reach both contacts, include the environment and runbook link, exclude secrets/personal data, and have a documented acknowledge/escalate/resolve path. The application already emits newline-delimited JSON to standard output; hosted verification must confirm Render preserves `timestamp`, `level`, `event`, request ID, status, duration, and redacted path fields.
+
+## Final go/no-go checklist
+
+A hosted release remains **no-go** until every item below has evidence:
+
+- reviewed `main` commit and all required GitHub Actions checks are green;
+- branch protection/check requirements are configured without granting pull-request jobs production secrets;
+- Render Blueprint values, exact HTTPS origin, proxy hop count, headers, secure cookie, static/API routing, health check, graceful shutdown, and SMTP egress are verified;
+- Neon pooled TLS connection, runtime/migration privileges, retention, snapshot/restore, logical-export storage, connection limits, and disposable-branch rehearsal are verified;
+- Resend sending domain, SPF/DKIM, least-privilege key, invitation/verification/reset receipt, expiry/single use, bounce/complaint visibility, and credential rotation are verified;
+- external uptime, structured-log ingestion, provider alerts, notification routing, and alert-response ownership are tested;
+- actual recovery point and recovery time are measured and accepted;
+- synthetic full workflow passes through the public HTTPS origin and all test data is removed;
+- rollback decision owner and application/database/email rollback steps are approved.
+
+Until then, keep `autoDeployTrigger: off`, do not add a migration startup hook, do not enable unrestricted public registration, and do not describe the service as production verified.

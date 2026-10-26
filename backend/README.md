@@ -68,13 +68,17 @@ The server checks PostgreSQL before listening, so invalid credentials or an unav
 
 ```powershell
 npm.cmd test
+npm.cmd run verify:migrations:postgres
+npm.cmd run verify:recovery:postgres
 npm.cmd run verify:auth:live
 npm.cmd run typecheck
 npm.cmd run build
 npm.cmd audit --omit=dev
 ```
 
-The integration tests use an isolated in-memory PostgreSQL-compatible database and a memory session store. They cover authentication, Argon2id storage, session cookies, authentication throttling, origin checks, 64 KB JSON limits, safe parser errors, production configuration, workspace isolation, project/task permissions, invitation lifecycle and email matching, role boundaries, comment ownership and moderation, member-removal assignment cleanup, activity isolation, token concurrency, outbox delivery, and migration cleanup. `verify:migrations:postgres` exercises concurrent migration runners against PostgreSQL. `verify:auth:live` and `verify:readiness:live` use unique temporary records and clean them up. The frontend browser QA scripts exercise complete workflows with temporary records and clean them up afterward.
+The integration tests use an isolated in-memory PostgreSQL-compatible database and a memory session store. They cover authentication, Argon2id storage, session cookies, authentication throttling, origin checks, 64 KB JSON limits, safe parser errors, production configuration, workspace isolation, project/task permissions, invitation lifecycle and email matching, role boundaries, comment ownership and moderation, member-removal assignment cleanup, activity isolation, token concurrency, outbox delivery, and migration cleanup. `verify:migrations:postgres` exercises concurrent migration runners against PostgreSQL. `verify:recovery:postgres` uses `pg_dump` and `pg_restore`, creates only a strictly named `projectflow_recovery_verify_<random hex>` database, compares the migration ledger and critical row counts, proves a failing migration rolls back, performs a transactional read/write smoke test, and drops the disposable database in cleanup. The source role must have `CREATEDB`, or `RECOVERY_ADMIN_DATABASE_URL` must temporarily provide a separate administrative connection that can create and drop a database owned by the source role. Never put that administrative URL in `.env`, CI logs, or repository files. On Windows, set `POSTGRES_BIN_DIR` for the command if PostgreSQL's `bin` directory is not on `PATH`.
+
+`verify:auth:live` and `verify:readiness:live` use unique temporary records and clean them up. The frontend browser QA scripts exercise complete workflows with temporary records and clean them up afterward.
 
 ## Browser behavior
 
@@ -115,4 +119,4 @@ Write requests must carry the exact `Origin` configured by `FRONTEND_ORIGIN`, wh
 - `DELETE /api/comments/:cid` for the author or a workspace owner/admin
 - `GET /api/tasks/:tid/activity`
 
-Workspace access is enforced server-side using membership joins, and inaccessible cross-workspace resources return 404. Owners may manage admins and members; admins may invite, revoke, and remove members; owners cannot be reassigned or removed. Ownership transfer, distributed throttling, live provider verification, backup/restore rehearsal, hosted proxy/TLS validation, and an external security review remain required before a public launch.
+Workspace access is enforced server-side using membership joins, and inaccessible cross-workspace resources return 404. Owners may manage admins and members; admins may invite, revoke, and remove members; owners cannot be reassigned or removed. Ownership transfer, distributed throttling, hosted backup/restore rehearsal, live provider verification, hosted proxy/TLS validation, and an external security review remain required before a public launch.

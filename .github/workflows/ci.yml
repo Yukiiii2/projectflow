@@ -94,3 +94,9 @@ jobs:
         working-directory: backend
       - run: npm run verify:migrations:postgres
         working-directory: backend
+      - name: Install PostgreSQL client tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes postgresql-client
+      - run: npm run verify:recovery:postgres
+        working-directory: backend
