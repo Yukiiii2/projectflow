@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "verify:production-bundle": "node scripts/verify-production-bundle.mjs",
     "typecheck": "tsc -b --pretty false",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -16,7 +17,7 @@
     "kanban:qa": "node scripts/kanban-qa.mjs",
     "collaboration:qa": "node scripts/collaboration-qa.mjs",
     "stage-f:qa": "node scripts/stage-f-qa.mjs",
-    "build:all": "npm run build && npm --prefix backend run build",
+    "build:all": "npm run build && npm run verify:production-bundle && npm --prefix backend run build",
     "start": "npm --prefix backend start"
   },
   "engines": {

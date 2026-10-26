@@ -15,7 +15,7 @@ This runbook prepares the approved single-service architecture. It does not auth
 
 1. Confirm `main` passes the GitHub Actions workflow.
 2. Run the complete local commands documented in the repository README.
-3. Confirm the production bundle contains no `http://localhost:4000`, `Preview state`, secrets, or `.env` content.
+3. Run `npm run build:all`; its production-bundle gate must confirm the output contains no localhost API URL, development preview controls, credential-shaped database URL, Resend key, or SMTP password.
 4. Confirm `render.yaml` contains only placeholders and non-secret configuration.
 5. Rehearse the database procedure in [DATABASE-RECOVERY.md](./DATABASE-RECOVERY.md).
 6. Confirm the CI PostgreSQL job completed both concurrent migration verification and the isolated `pg_dump`/`pg_restore` recovery rehearsal.
@@ -28,7 +28,7 @@ This runbook prepares the approved single-service architecture. It does not auth
 3. Create a Neon snapshot or recovery branch, restore it to a separate branch, and complete the database runbook before accepting non-recreatable data.
 4. Create a Resend account, approve a sending domain, and publish the exact SPF/DKIM records Resend provides. Create a sending-only key restricted to the production domain where available; Resend supports sending-scoped API keys ([Resend API key permissions](https://resend.com/changelog/new-api-key-permissions)).
 5. Confirm the sender identity matches `INVITATION_FROM`, then test the Resend HTTPS email API. Each outbox row supplies a stable idempotency key, which Resend retains for 24 hours to prevent duplicate sends during retries ([Resend idempotency keys](https://resend.com/changelog/idempotency-keys)).
-6. Create a Render Blueprint from this repository. Review the proposed Free service, Node.js 24, build/start commands, `/api/health`, environment values, region, and plan before applying it. Accept the documented cold-start, quota, outbound-traffic, no-shell, and ephemeral-filesystem limits ([Render Free limitations](https://render.com/docs/free)).
+6. Create a Render Blueprint from this repository. Review the proposed Free service, Node.js 24, build/start commands, `/api/health`, environment values, region, and plan before applying it. Confirm `plan: free`, no disk/database/add-on, and no automatic upgrade or paid workspace feature. Accept the documented cold-start, quota, outbound-traffic, no-shell, and ephemeral-filesystem limits ([Render Free limitations](https://render.com/docs/free)). If the account has a payment method, configure available spend controls and alerts before launch; otherwise stop instead of accepting an overage or upgrade prompt.
 7. Keep automatic deploys disabled. Render supports waiting for CI checks before automatic deploys, but enable that only after the first manual release and rollback rehearsal pass ([Render deploys](https://render.com/docs/deploys)).
 
 ## Render variables
@@ -43,6 +43,8 @@ Set secret fields directly in Render. Never place them in GitHub, chat, screensh
 - `INVITATION_FROM`: verified sender such as `ProjectFlow <invites@example.com>`.
 
 The Blueprint supplies non-secret values for Node.js 24, `NODE_ENV`, proxy hops, token lifetimes, `INVITATION_DELIVERY=resend`, and log level. Do not add `MIGRATION_DATABASE_URL` to the Render web service: it belongs only in the protected operator environment while migrations run.
+
+Render supplies `PORT`; do not hard-code or override it. Do not configure `VITE_API_URL`, any `SMTP_*` variable, `MIGRATION_DATABASE_URL`, or a recovery/admin database URL on the web service. The production frontend always uses same-origin `/api` routes.
 
 ## Initial release sequence
 
@@ -70,6 +72,8 @@ Drain or deliberately purge the outbox before rotating `EMAIL_OUTBOX_KEY`; queue
 - Email: revoke the Resend key, issue a new least-privilege key, and verify delivery before re-enabling public actions.
 
 Database migrations remain a protected operator step. `render.yaml` deliberately does not run them at application startup or automatically on every instance. Render Free has no shell or one-off jobs, so run migrations from the trusted local operator environment with `MIGRATION_DATABASE_URL`; never substitute the pooled runtime URL. A future paid-service pre-deploy command can be considered only after hosted backup/restore and migration-role verification.
+
+Before upgrading to `pg` 9 or `pg-connection-string` 3, review their announced libpq-compatible TLS-mode change. Prefer a Neon URL with `sslmode=verify-full` when supported and retest hostname/certificate validation; do not silently rely on the current driver's stronger interpretation of `sslmode=require`.
 
 ## Monitoring and maintenance
 

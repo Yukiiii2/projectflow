@@ -19,7 +19,9 @@ export function resolveApiBaseUrl(configured: string | undefined, fallback: stri
   return (configured ?? fallback).replace(/\/$/, '')
 }
 
-const apiBaseUrl = resolveApiBaseUrl(import.meta.env.VITE_API_URL, import.meta.env.DEV ? 'http://localhost:4000' : '')
+const apiBaseUrl = import.meta.env.DEV
+  ? resolveApiBaseUrl(import.meta.env.VITE_API_URL, 'http://localhost:4000')
+  : ''
 export const sessionExpiredEvent = 'projectflow:session-expired'
 
 export class ApiError extends Error {

@@ -164,6 +164,7 @@ Run the checks from the repository root:
 npm.cmd test
 npm.cmd run typecheck
 npm.cmd run build
+npm.cmd run verify:production-bundle
 npm.cmd audit
 
 # Complete production builds
@@ -216,6 +217,9 @@ Completed and locally verified:
 - Stage F — application QA and security hardening
 - Stage G1 — deployment planning and readiness assessment
 - Stage G2 — local production-readiness implementation
+- Stage G3A — Free-tier deployment compatibility
+- Stage G3B — Neon initialization and least-privilege runtime role
+- Stage G3C — local Render Free deployment readiness
 
 ## Deployment readiness
 
@@ -229,6 +233,7 @@ Read [the deployment runbook](./docs/DEPLOYMENT-RUNBOOK.md) and [database recove
 - Resend HTTPS API delivery is implemented, but live provider delivery, sender DNS, bounce handling, and account recovery email receipt have not been verified.
 - Rate limits use process memory and require a shared store for multiple API instances.
 - Local production configuration, CSP/HSTS, proxy assumptions, TLS database validation, migration safety, and structured redacted logs are implemented; their behavior through Render and Neon remains a hosted verification gate.
+- The current `pg` stack treats Neon's `sslmode=require` as host-verifying TLS, but its next major version plans to align with libpq semantics. Review and prefer `sslmode=verify-full` before that dependency upgrade.
 - Workspace ownership transfer, distributed throttling, production backup scheduling/storage, hosted Neon restore rehearsal, and external security testing remain outstanding. The equivalent local and CI logical restore path is automated and verified.
 - Real-time updates, advanced search, notifications, calendar views, advanced analytics, and customizable workflows are outside the current release.
 
