@@ -4,7 +4,7 @@ import { processNextOutboxMessage, queuedInvitationDelivery } from './email-outb
 describe('production email outbox', () => {
   const key = Buffer.alloc(32, 7)
 
-  it('queues delivery without awaiting the SMTP transport', async () => {
+  it('queues delivery without awaiting the email transport', async () => {
     const query = vi.fn().mockResolvedValue({ rows: [] })
     const delivery = queuedInvitationDelivery({ query } as never, key)
 
@@ -39,7 +39,7 @@ describe('production email outbox', () => {
     )
 
     expect(delivered).toBe(true)
-    expect(sendPasswordReset).toHaveBeenCalledWith(message)
+    expect(sendPasswordReset).toHaveBeenCalledWith(message, { idempotencyKey: 'projectflow/outbox/job-id' })
     expect(query.mock.calls[2]?.[0]).toContain('DELETE FROM email_outbox')
   })
 

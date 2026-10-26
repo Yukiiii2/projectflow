@@ -2,7 +2,7 @@ services:
   - type: web
     name: projectflow
     runtime: node
-    plan: starter
+    plan: free
     region: singapore
     autoDeployTrigger: off
     buildCommand: npm ci && npm --prefix backend ci && npm run build:all
@@ -10,7 +10,7 @@ services:
     healthCheckPath: /api/health
     envVars:
       - key: NODE_VERSION
-        value: 20
+        value: 24
       - key: NODE_ENV
         value: production
       - key: DATABASE_URL
@@ -30,14 +30,8 @@ services:
       - key: PASSWORD_RESET_TTL_MINUTES
         value: "60"
       - key: INVITATION_DELIVERY
-        value: smtp
-      - key: SMTP_HOST
-        value: smtp.resend.com
-      - key: SMTP_PORT
-        value: "465"
-      - key: SMTP_USER
         value: resend
-      - key: SMTP_PASSWORD
+      - key: RESEND_API_KEY
         sync: false
       - key: EMAIL_OUTBOX_KEY
         sync: false

@@ -41,7 +41,7 @@ All screenshots contain synthetic development data.
 | Data | PostgreSQL, `node-postgres`, numbered raw SQL migrations |
 | Authentication | Argon2id, `express-session`, PostgreSQL session store, HttpOnly cookies |
 | Validation and security | Zod, Helmet, strict write-origin checks, bounded JSON requests, rate limiting |
-| Collaboration | PostgreSQL email outbox, Nodemailer local preview, and Resend SMTP delivery |
+| Collaboration | Encrypted PostgreSQL email outbox, local preview, optional SMTP, and Resend HTTPS API delivery |
 | Quality | Vitest, Testing Library, Supertest, Playwright, axe-core |
 
 The backend uses SQL directly through `node-postgres`. Prisma is not installed or used.
@@ -55,7 +55,7 @@ flowchart LR
     API -->|Server-side sessions| DB
     API -->|Durable production queue| DB
     API -->|Local preview| Mail[Email delivery]
-    DB -->|Outbox worker via SMTP| Mail
+    DB -->|Outbox worker via HTTPS API| Mail
 ```
 
 The frontend keeps authentication and the selected workspace in shared React state. Every protected API operation is authorized again on the server. Workspace membership joins scope projects, tasks, comments, invitations, and activity records; inaccessible cross-workspace resources return `404` without disclosing their existence.
@@ -76,7 +76,7 @@ projectflow/
 
 ## Requirements
 
-- Node.js 20 or newer
+- Node.js 24 LTS
 - npm
 - PostgreSQL running locally or an accessible PostgreSQL instance
 
@@ -95,7 +95,7 @@ Frontend:
 VITE_API_URL=http://localhost:4000
 ```
 
-Backend variables include `DATABASE_URL`, `SESSION_SECRET`, `FRONTEND_ORIGIN`, token lifetimes, proxy trust, verification policy, logging, SMTP credentials, and `EMAIL_OUTBOX_KEY`. Generate unique session and 32-byte base64 outbox-encryption keys and keep both `.env` files local. Production requires an exact HTTPS origin, a TLS PostgreSQL URL containing `sslmode=require` or stronger, verified SMTP configuration, and email verification. See [backend/.env.example](./backend/.env.example) for the complete safe template.
+Backend variables include `DATABASE_URL`, `SESSION_SECRET`, `FRONTEND_ORIGIN`, token lifetimes, proxy trust, verification policy, logging, Resend API configuration, and `EMAIL_OUTBOX_KEY`. Generate unique session and 32-byte base64 outbox-encryption keys and keep both `.env` files local. Production requires an exact HTTPS origin, a TLS PostgreSQL URL containing `sslmode=require` or stronger, verified email delivery, and email verification. Production migrations use a separate operator-only `MIGRATION_DATABASE_URL` so the normal application can retain Neon's pooled `DATABASE_URL`. See [backend/.env.example](./backend/.env.example) for the complete safe template.
 
 ## PostgreSQL setup on Windows
 
@@ -199,7 +199,7 @@ The QA scripts remove only records they create. Generated screenshots, reports, 
 - Login and registration endpoints are rate-limited.
 - Invitation tokens are high entropy, expiring, revocable, single-use, absent from list APIs, and stored only as SHA-256 hashes.
 - Verification and reset tokens are high entropy, expiring, single-use, and stored only as SHA-256 hashes. Reset requests return the same response for known and unknown email addresses.
-- Production invitation, verification, and reset messages enter a PostgreSQL outbox before SMTP delivery. Successful jobs are deleted so bearer links are not retained, and reset requests use a minimum response window to reduce account-enumeration timing differences.
+- Production invitation, verification, and reset messages enter an encrypted PostgreSQL outbox before Resend HTTPS delivery. Stable idempotency keys protect retries from duplicate sends, successful jobs are deleted so bearer links are not retained, and reset requests use a minimum response window to reduce account-enumeration timing differences.
 - PostgreSQL operations use parameterized SQL and server-side membership checks.
 
 The [Stage F QA and security checkpoint](./STAGE-F-QA-SECURITY-CHECKPOINT.md) records the verified findings, fixes, open risks, and deployment gates.
@@ -219,14 +219,14 @@ Completed and locally verified:
 
 ## Deployment readiness
 
-The approved target is one Render web service serving both Express `/api` routes and the compiled Vite application, with Neon PostgreSQL and Resend SMTP. The committed `render.yaml` keeps automatic deploys off and contains no credentials. GitHub Actions runs frontend/backend tests, three backend timezone variants, typechecks, builds, high-severity dependency audits, a real PostgreSQL concurrent-migration check, and an isolated `pg_dump`/`pg_restore` recovery rehearsal with a failed-migration rollback probe.
+The approved target is one Render Free web service serving both Express `/api` routes and the compiled Vite application, with Neon Free PostgreSQL and the Resend Free HTTPS API. The committed `render.yaml` keeps automatic deploys off and contains no credentials. GitHub Actions runs on Node.js 24 LTS and covers frontend/backend tests, three backend timezone variants, typechecks, builds, high-severity dependency audits, a real PostgreSQL concurrent-migration check, and an isolated `pg_dump`/`pg_restore` recovery rehearsal with a failed-migration rollback probe.
 
 Read [the deployment runbook](./docs/DEPLOYMENT-RUNBOOK.md) and [database recovery procedure](./docs/DATABASE-RECOVERY.md) before creating resources. A hosted deployment still requires explicit approval.
 
 ## Known limitations and deployment blockers
 
 - No public deployment or production environment has been verified.
-- Resend-compatible SMTP transport is implemented, but live provider delivery, sender DNS, bounce handling, and account recovery email receipt have not been verified.
+- Resend HTTPS API delivery is implemented, but live provider delivery, sender DNS, bounce handling, and account recovery email receipt have not been verified.
 - Rate limits use process memory and require a shared store for multiple API instances.
 - Local production configuration, CSP/HSTS, proxy assumptions, TLS database validation, migration safety, and structured redacted logs are implemented; their behavior through Render and Neon remains a hosted verification gate.
 - Workspace ownership transfer, distributed throttling, production backup scheduling/storage, hosted Neon restore rehearsal, and external security testing remain outstanding. The equivalent local and CI logical restore path is automated and verified.

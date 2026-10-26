@@ -28,11 +28,15 @@ export interface PasswordResetMessage {
   resetUrl: string
 }
 
+export interface DeliveryOptions {
+  idempotencyKey?: string
+}
+
 export interface InvitationDelivery {
-  mode: 'preview' | 'smtp'
-  send(message: InvitationMessage): Promise<InvitationDeliveryResult>
-  sendVerification(message: VerificationMessage): Promise<InvitationDeliveryResult>
-  sendPasswordReset(message: PasswordResetMessage): Promise<InvitationDeliveryResult>
+  mode: 'preview' | 'resend' | 'smtp'
+  send(message: InvitationMessage, options?: DeliveryOptions): Promise<InvitationDeliveryResult>
+  sendVerification(message: VerificationMessage, options?: DeliveryOptions): Promise<InvitationDeliveryResult>
+  sendPasswordReset(message: PasswordResetMessage, options?: DeliveryOptions): Promise<InvitationDeliveryResult>
 }
 
 export function previewInvitationDelivery(): InvitationDelivery {
@@ -54,13 +58,89 @@ function smtpTransportSecurity(port: number, production: boolean) {
   return { secure: false, requireTLS: false }
 }
 
+class ResendApiError extends Error {
+  override name = 'ResendApiError'
+}
+
+function resendApiDelivery(apiKey: string, from: string): InvitationDelivery {
+  async function deliver(recipient: string, subject: string, text: string, html: string, options?: DeliveryOptions) {
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+      'User-Agent': 'ProjectFlow/1.0',
+    }
+    if (options?.idempotencyKey) headers['Idempotency-Key'] = options.idempotencyKey
+
+    let response: Response
+    try {
+      response = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ from, to: [recipient], subject: headerText(subject), text, html }),
+        signal: AbortSignal.timeout(10_000),
+      })
+    } catch (error) {
+      throw new ResendApiError('Resend API request failed', { cause: error })
+    }
+    if (!response.ok) throw new ResendApiError(`Resend API request failed with status ${response.status}`)
+
+    let result: unknown
+    try {
+      result = await response.json()
+    } catch (error) {
+      throw new ResendApiError('Resend API returned an invalid response', { cause: error })
+    }
+    if (!result || typeof result !== 'object' || typeof (result as { id?: unknown }).id !== 'string' || !(result as { id: string }).id) {
+      throw new ResendApiError('Resend API returned an invalid response')
+    }
+    return { status: 'sent' as const }
+  }
+
+  return {
+    mode: 'resend',
+    async send(message, options) {
+      return deliver(
+        message.recipient,
+        `${message.inviterName} invited you to ${message.workspaceName}`,
+        `You were invited to join ${message.workspaceName} as ${message.role}. Accept before ${message.expiresAt}: ${message.acceptUrl}`,
+        `<p><strong>${escapeHtml(message.inviterName)}</strong> invited you to <strong>${escapeHtml(message.workspaceName)}</strong> as ${message.role}.</p><p><a href="${escapeHtml(message.acceptUrl)}">Accept invitation</a></p><p>This invitation expires ${escapeHtml(message.expiresAt)}.</p>`,
+        options,
+      )
+    },
+    async sendVerification(message, options) {
+      return deliver(
+        message.recipient,
+        'Verify your ProjectFlow email',
+        `Hello ${message.name}. Verify your email before ${message.expiresAt}: ${message.verifyUrl}`,
+        `<p>Hello ${escapeHtml(message.name)}.</p><p><a href="${escapeHtml(message.verifyUrl)}">Verify your ProjectFlow email</a></p><p>This link expires ${escapeHtml(message.expiresAt)}.</p>`,
+        options,
+      )
+    },
+    async sendPasswordReset(message, options) {
+      return deliver(
+        message.recipient,
+        'Reset your ProjectFlow password',
+        `Hello ${message.name}. Reset your password before ${message.expiresAt}: ${message.resetUrl}`,
+        `<p>Hello ${escapeHtml(message.name)}.</p><p><a href="${escapeHtml(message.resetUrl)}">Reset your ProjectFlow password</a></p><p>This link expires ${escapeHtml(message.expiresAt)}. If you did not request this, you can ignore this email.</p>`,
+        options,
+      )
+    },
+  }
+}
+
 export function invitationDeliveryFromEnv(production: boolean): InvitationDelivery {
-  const mode = process.env.INVITATION_DELIVERY ?? (production ? 'smtp' : 'preview')
+  const mode = process.env.INVITATION_DELIVERY ?? (production ? 'resend' : 'preview')
   if (mode === 'preview') {
     if (production) throw new Error('INVITATION_DELIVERY=preview is not allowed in production')
     return previewInvitationDelivery()
   }
-  if (mode !== 'smtp') throw new Error('INVITATION_DELIVERY must be preview or smtp')
+  if (mode === 'resend') {
+    const apiKey = process.env.RESEND_API_KEY
+    const from = process.env.INVITATION_FROM
+    if (!apiKey || !from) throw new Error('RESEND_API_KEY and INVITATION_FROM are required for Resend API delivery')
+    return resendApiDelivery(apiKey, from)
+  }
+  if (mode !== 'smtp') throw new Error('INVITATION_DELIVERY must be preview, resend, or smtp')
 
   const host = process.env.SMTP_HOST
   const port = Number(process.env.SMTP_PORT ?? 587)

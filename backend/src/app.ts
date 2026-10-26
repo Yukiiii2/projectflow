@@ -101,7 +101,7 @@ export function createApp({ db, sessionStore, config, invitationDelivery = previ
   const passwordResetTtlMinutes = config.passwordResetTtlMinutes ?? 60;
   const recoveryResponseFloorMs = config.recoveryResponseFloorMs ?? (config.production ? 250 : 0);
   if (!Number.isFinite(invitationTtlHours) || invitationTtlHours < 1 || invitationTtlHours > 720) throw new Error('Invitation TTL must be between 1 and 720 hours');
-  if (config.production && invitationDelivery.mode !== 'smtp') throw new Error('Production invitation delivery must use SMTP');
+  if (config.production && invitationDelivery.mode === 'preview') throw new Error('Production invitation delivery must use a configured email transport');
   const app = express();
   const sessionCookieName = config.production ? '__Host-projectflow.sid' : 'projectflow.sid';
   const cookie = { httpOnly: true, secure: config.production, sameSite: 'lax' as const, maxAge: 604800000, path: '/', priority: 'high' as const };

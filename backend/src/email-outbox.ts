@@ -93,9 +93,10 @@ export async function processNextOutboxMessage(db: Pool, delivery: InvitationDel
 
   try {
     const payload = decryptPayload(key, row.payload)
-    if (row.kind === 'invitation') await delivery.send(payload as InvitationMessage)
-    else if (row.kind === 'email_verification') await delivery.sendVerification(payload as VerificationMessage)
-    else if (row.kind === 'password_reset') await delivery.sendPasswordReset(payload as PasswordResetMessage)
+    const options = { idempotencyKey: `projectflow/outbox/${row.id}` }
+    if (row.kind === 'invitation') await delivery.send(payload as InvitationMessage, options)
+    else if (row.kind === 'email_verification') await delivery.sendVerification(payload as VerificationMessage, options)
+    else if (row.kind === 'password_reset') await delivery.sendPasswordReset(payload as PasswordResetMessage, options)
     else throw new Error('Unsupported email outbox kind')
     await db.query('DELETE FROM email_outbox WHERE id=$1', [row.id])
     logger.info('email_outbox_delivered', { messageId: row.id, kind: row.kind })

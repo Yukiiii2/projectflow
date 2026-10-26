@@ -10,6 +10,7 @@ ProjectFlow uses ordered raw SQL files in `backend/sql`. The migration runner se
 4. Test every migration and recovery path against a disposable database or Neon branch first.
 5. Use a migration role for schema changes and a lower-privilege runtime role where the provider supports it. The runtime role needs data access to `session` and `email_outbox`, but not `CREATE DATABASE` or `CREATE TABLE`.
 6. Do not use destructive down migrations as routine rollback. Restore data separately and deploy compatible application code.
+7. Use Neon's pooled TLS endpoint only for the application `DATABASE_URL`. Production migration commands require the direct, non-pooler TLS endpoint in the operator-only `MIGRATION_DATABASE_URL` because the runner holds a session advisory lock across transactions.
 
 ## Local logical-backup rehearsal
 
@@ -51,11 +52,15 @@ An interrupted process can leave a temporary database or dump. Before retrying, 
 
 ```powershell
 Set-Location backend
+$env:NODE_ENV = 'production'
+$env:MIGRATION_DATABASE_URL = '<direct Neon TLS URL from the password manager>'
 npm.cmd run db:migrate
 npm.cmd run db:migrate
+Remove-Item Env:MIGRATION_DATABASE_URL
+Remove-Item Env:NODE_ENV
 ```
 
-The first command should report only newly applied migrations. The second must report zero applied and every numbered migration already current. A checksum mismatch means an applied file changed; stop and restore the original file rather than bypassing the check.
+Do not paste the real URL into a tracked script or transcript; assign it privately in the operator shell. The first command should report only newly applied migrations. The second must report zero applied and every numbered migration already current. A checksum mismatch means an applied file changed; stop and restore the original file rather than bypassing the check.
 
 Verify the ledger, `/api/health`, authentication, a representative authorized read/write workflow, outbox processing, and a cross-workspace denial. Record the finish time and actual recovery/migration duration so the RTO is measured rather than assumed.
 

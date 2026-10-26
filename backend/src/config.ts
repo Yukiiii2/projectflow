@@ -63,10 +63,17 @@ export function loadServerConfig(environment: NodeJS.ProcessEnv): ServerConfig {
   const requireEmailVerification = boolean(environment.REQUIRE_EMAIL_VERIFICATION, production, 'REQUIRE_EMAIL_VERIFICATION')
   if (production && !requireEmailVerification) throw new Error('Production requires email verification')
   if (production) {
-    if (environment.INVITATION_DELIVERY !== 'smtp') throw new Error('Production email delivery must use SMTP')
-    const required = ['SMTP_HOST', 'SMTP_USER', 'SMTP_PASSWORD', 'INVITATION_FROM'] as const
-    if (required.some((name) => !environment[name])) throw new Error('Production SMTP configuration is incomplete')
-    if (isPlaceholder(environment.SMTP_PASSWORD)) throw new Error('Production SMTP_PASSWORD must not use a placeholder')
+    if (!['resend', 'smtp'].includes(environment.INVITATION_DELIVERY ?? '')) {
+      throw new Error('Production email delivery must use the Resend API or SMTP')
+    }
+    if (environment.INVITATION_DELIVERY === 'resend') {
+      if (!environment.RESEND_API_KEY || !environment.INVITATION_FROM) throw new Error('Production Resend API configuration is incomplete')
+      if (isPlaceholder(environment.RESEND_API_KEY)) throw new Error('Production RESEND_API_KEY must not use a placeholder')
+    } else {
+      const required = ['SMTP_HOST', 'SMTP_USER', 'SMTP_PASSWORD', 'INVITATION_FROM'] as const
+      if (required.some((name) => !environment[name])) throw new Error('Production SMTP configuration is incomplete')
+      if (isPlaceholder(environment.SMTP_PASSWORD)) throw new Error('Production SMTP_PASSWORD must not use a placeholder')
+    }
     if (!environment.EMAIL_OUTBOX_KEY || isPlaceholder(environment.EMAIL_OUTBOX_KEY)) throw new Error('Production EMAIL_OUTBOX_KEY is required')
   }
 

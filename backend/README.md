@@ -45,7 +45,7 @@ npm.cmd run db:migrate
 npm.cmd run dev
 ```
 
-The migration command checks every numbered SQL migration in order. It uses an advisory lock, one transaction per pending file, and a checksum ledger so repeat runs skip applied files and changed migration history is rejected. Migration `003_account_security.sql` adds verified-email state, session versions, and hashed authentication tokens without deleting existing data. Migration `004_runtime_operations.sql` tracks the session table, enforces one outstanding token per user/purpose, and creates the production email outbox so the runtime role does not need schema privileges.
+The migration command checks every numbered SQL migration in order. It uses a session advisory lock, one transaction per pending file, and a checksum ledger so repeat runs skip applied files and changed migration history is rejected. Local and CI runs fall back to `DATABASE_URL`; production requires an operator-only `MIGRATION_DATABASE_URL` using Neon's direct, non-pooler TLS endpoint. The normal application continues using the pooled `DATABASE_URL`. Migration `003_account_security.sql` adds verified-email state, session versions, and hashed authentication tokens without deleting existing data. Migration `004_runtime_operations.sql` tracks the session table, enforces one outstanding token per user/purpose, and creates the production email outbox so the runtime role does not need schema privileges.
 
 Local invitation delivery defaults to a preview link:
 
@@ -54,7 +54,7 @@ INVITATION_TTL_HOURS=168
 INVITATION_DELIVERY=preview
 ```
 
-Preview mode does not send an email. To test Resend delivery, set `INVITATION_DELIVERY=smtp`, use `smtp.resend.com`, port `465`, user `resend`, a Resend API key as `SMTP_PASSWORD`, and a verified `INVITATION_FROM`. Resend ports `465` and `2465` use implicit TLS; ports `587` and `2587` require STARTTLS. Production rejects preview delivery and other SMTP ports. Production requests atomically place invitation, verification, and reset messages in a PostgreSQL outbox with their source records. AES-256-GCM protects queued payloads using `EMAIL_OUTBOX_KEY`; the worker uses bounded SMTP timeouts and deletes successful, expired, or five-times-failed rows. Authentication token tables store only SHA-256 hashes.
+Preview mode does not send an email. For Render Free, set `INVITATION_DELIVERY=resend`, provide a sending-only `RESEND_API_KEY`, and use a verified `INVITATION_FROM`. Delivery uses Resend's fixed HTTPS endpoint, a ten-second timeout, required authorization and user-agent headers, and a stable outbox-row idempotency key. Optional SMTP compatibility remains available on hosts that permit outbound SMTP by setting `INVITATION_DELIVERY=smtp` and the documented `SMTP_*` values. Production rejects preview delivery. Production requests atomically place invitation, verification, and reset messages in a PostgreSQL outbox with their source records. AES-256-GCM protects queued payloads using `EMAIL_OUTBOX_KEY`; the worker applies bounded retries and deletes successful, expired, or five-times-failed rows. Authentication token tables store only SHA-256 hashes.
 
 The API defaults to `http://localhost:4000`. Confirm database-backed health from another PowerShell window:
 
@@ -82,7 +82,7 @@ The integration tests use an isolated in-memory PostgreSQL-compatible database a
 
 ## Browser behavior
 
-Write requests must carry the exact `Origin` configured by `FRONTEND_ORIGIN`, which defaults to `http://localhost:5173`. Cross-site Fetch Metadata is rejected. Browser requests use `credentials: 'include'`. Production requires an HTTPS origin, a TLS PostgreSQL URL, SMTP delivery, email verification, a non-placeholder session secret, a known proxy-hop count, and a Secure/HttpOnly/SameSite=Lax `__Host-projectflow.sid` cookie. Failed logins are limited to 10 per 15 minutes per client IP; registrations are limited to 20 per hour; recovery routes are limited to 10 per 15 minutes. Replace the in-memory limiter store before horizontal scaling.
+Write requests must carry the exact `Origin` configured by `FRONTEND_ORIGIN`, which defaults to `http://localhost:5173`. Cross-site Fetch Metadata is rejected. Browser requests use `credentials: 'include'`. Production requires an HTTPS origin, a TLS PostgreSQL URL, configured Resend API or SMTP delivery, email verification, a non-placeholder session secret, a known proxy-hop count, and a Secure/HttpOnly/SameSite=Lax `__Host-projectflow.sid` cookie. Failed logins are limited to 10 per 15 minutes per client IP; registrations are limited to 20 per hour; recovery routes are limited to 10 per 15 minutes. Replace the in-memory limiter store before horizontal scaling.
 
 ## Current API
 

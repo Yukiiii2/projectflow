@@ -12,6 +12,7 @@ const originalEnvironment = { ...process.env }
 afterEach(() => {
   process.env = { ...originalEnvironment }
   createTransport.mockClear()
+  vi.unstubAllGlobals()
 })
 
 function configureSmtp(port: string) {
@@ -20,6 +21,12 @@ function configureSmtp(port: string) {
   process.env.SMTP_PORT = port
   process.env.SMTP_USER = 'resend'
   process.env.SMTP_PASSWORD = 'test-resend-secret'
+  process.env.INVITATION_FROM = 'ProjectFlow <invites@projectflow.example>'
+}
+
+function configureResendApi() {
+  process.env.INVITATION_DELIVERY = 'resend'
+  process.env.RESEND_API_KEY = 'test-resend-api-key'
   process.env.INVITATION_FROM = 'ProjectFlow <invites@projectflow.example>'
 }
 
@@ -78,5 +85,96 @@ describe('invitation delivery configuration', () => {
 
     expect(() => invitationDeliveryFromEnv(true)).toThrow('Production SMTP_PORT')
     expect(createTransport).not.toHaveBeenCalled()
+  })
+
+  it('sends password recovery through the Resend HTTPS API with a stable idempotency key', async () => {
+    configureResendApi()
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: 'email-id' }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const delivery = invitationDeliveryFromEnv(true)
+    const result = await delivery.sendPasswordReset({
+      recipient: 'maya@example.com',
+      name: 'Maya',
+      expiresAt: '2026-10-27T00:00:00.000Z',
+      resetUrl: 'https://projectflow.example/reset-password?token=secret',
+    }, { idempotencyKey: 'projectflow/outbox/job-id' })
+
+    expect(result).toEqual({ status: 'sent' })
+    expect(fetchMock).toHaveBeenCalledOnce()
+    const [url, request] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('https://api.resend.com/emails')
+    expect(request).toMatchObject({ method: 'POST' })
+    expect(request.headers).toMatchObject({
+      Authorization: 'Bearer test-resend-api-key',
+      'Content-Type': 'application/json',
+      'Idempotency-Key': 'projectflow/outbox/job-id',
+      'User-Agent': 'ProjectFlow/1.0',
+    })
+    expect(JSON.parse(String(request.body))).toMatchObject({
+      from: 'ProjectFlow <invites@projectflow.example>',
+      to: ['maya@example.com'],
+      subject: 'Reset your ProjectFlow password',
+    })
+  })
+
+  it('turns a Resend API rejection into a secret-safe delivery failure', async () => {
+    configureResendApi()
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      message: 'provider detail containing test-resend-api-key',
+    }), { status: 429 })))
+
+    const delivery = invitationDeliveryFromEnv(true)
+    const failure = await delivery.sendVerification({
+      recipient: 'maya@example.com',
+      name: 'Maya',
+      expiresAt: '2026-10-27T00:00:00.000Z',
+      verifyUrl: 'https://projectflow.example/verify-email?token=secret',
+    }).catch((error: unknown) => error)
+
+    expect(failure).toMatchObject({ name: 'ResendApiError', message: 'Resend API request failed with status 429' })
+    expect(String(failure)).not.toContain('test-resend-api-key')
+    expect(String(failure)).not.toContain('provider detail')
+  })
+
+  it('turns a Resend network failure into a provider-neutral delivery failure', async () => {
+    configureResendApi()
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('socket failure with test-resend-api-key')))
+
+    const failure = await invitationDeliveryFromEnv(true).sendVerification({
+      recipient: 'maya@example.com',
+      name: 'Maya',
+      expiresAt: '2026-10-27T00:00:00.000Z',
+      verifyUrl: 'https://projectflow.example/verify-email?token=secret',
+    }).catch((error: unknown) => error)
+
+    expect(failure).toMatchObject({ name: 'ResendApiError', message: 'Resend API request failed' })
+    expect(String(failure)).not.toContain('test-resend-api-key')
+  })
+
+  it('rejects a successful Resend response that has no message id', async () => {
+    configureResendApi()
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{}', {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })))
+
+    await expect(invitationDeliveryFromEnv(true).sendVerification({
+      recipient: 'maya@example.com',
+      name: 'Maya',
+      expiresAt: '2026-10-27T00:00:00.000Z',
+      verifyUrl: 'https://projectflow.example/verify-email?token=secret',
+    })).rejects.toThrow('Resend API returned an invalid response')
+  })
+
+  it('rejects incomplete Resend API configuration before startup', () => {
+    process.env.INVITATION_DELIVERY = 'resend'
+    delete process.env.RESEND_API_KEY
+    process.env.INVITATION_FROM = 'ProjectFlow <invites@projectflow.example>'
+
+    expect(() => invitationDeliveryFromEnv(true)).toThrow('RESEND_API_KEY and INVITATION_FROM are required')
   })
 })

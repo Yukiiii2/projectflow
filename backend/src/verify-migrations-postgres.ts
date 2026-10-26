@@ -2,12 +2,12 @@ import 'dotenv/config'
 import { readdir } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import pg from 'pg'
+import { loadMigrationDatabaseUrl } from './migration-config.js'
 import { runMigrations } from './migrations.js'
 
-if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL missing')
 const directory = fileURLToPath(new URL('../sql/', import.meta.url))
 const expected = (await readdir(directory)).filter((name) => /^\d+.*\.sql$/.test(name)).sort()
-const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 4 })
+const pool = new pg.Pool({ connectionString: loadMigrationDatabaseUrl(process.env), max: 4 })
 
 try {
   await Promise.all([runMigrations(pool, directory), runMigrations(pool, directory)])

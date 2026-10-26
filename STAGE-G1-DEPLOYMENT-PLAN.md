@@ -1,5 +1,7 @@
 # ProjectFlow Stage G1 — Production Deployment Planning and Readiness Assessment
 
+> **Superseded deployment profile:** Stage G3A selects the zero-cost Render Free + Neon Free + Resend HTTPS API profile described in this plan. See `STAGE-G3A-DEPLOYMENT-PREFLIGHT.md` and `docs/DEPLOYMENT-RUNBOOK.md` for the current configuration. Historical paid/SMTP recommendations below are retained as planning history.
+
 **Status:** Planning complete; deployment not started
 
 **Prepared:** 2026-10-22
