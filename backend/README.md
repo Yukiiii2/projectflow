@@ -54,7 +54,7 @@ INVITATION_TTL_HOURS=168
 INVITATION_DELIVERY=preview
 ```
 
-Preview mode does not send an email. To test Resend delivery, set `INVITATION_DELIVERY=smtp`, use `smtp.resend.com`, port `465`, user `resend`, a Resend API key as `SMTP_PASSWORD`, and a verified `INVITATION_FROM`. Production rejects preview delivery. Production requests atomically place invitation, verification, and reset messages in a PostgreSQL outbox with their source records. AES-256-GCM protects queued payloads using `EMAIL_OUTBOX_KEY`; the worker uses bounded SMTP timeouts and deletes successful, expired, or five-times-failed rows. Authentication token tables store only SHA-256 hashes.
+Preview mode does not send an email. To test Resend delivery, set `INVITATION_DELIVERY=smtp`, use `smtp.resend.com`, port `465`, user `resend`, a Resend API key as `SMTP_PASSWORD`, and a verified `INVITATION_FROM`. Resend ports `465` and `2465` use implicit TLS; ports `587` and `2587` require STARTTLS. Production rejects preview delivery and other SMTP ports. Production requests atomically place invitation, verification, and reset messages in a PostgreSQL outbox with their source records. AES-256-GCM protects queued payloads using `EMAIL_OUTBOX_KEY`; the worker uses bounded SMTP timeouts and deletes successful, expired, or five-times-failed rows. Authentication token tables store only SHA-256 hashes.
 
 The API defaults to `http://localhost:4000`. Confirm database-backed health from another PowerShell window:
 

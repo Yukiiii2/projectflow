@@ -1,11 +1,27 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { invitationDeliveryFromEnv, previewInvitationDelivery } from './invitation-delivery.js'
+
+const { createTransport } = vi.hoisted(() => ({
+  createTransport: vi.fn(() => ({ sendMail: vi.fn() })),
+}))
+
+vi.mock('nodemailer', () => ({ default: { createTransport } }))
 
 const originalEnvironment = { ...process.env }
 
 afterEach(() => {
   process.env = { ...originalEnvironment }
+  createTransport.mockClear()
 })
+
+function configureSmtp(port: string) {
+  process.env.INVITATION_DELIVERY = 'smtp'
+  process.env.SMTP_HOST = 'smtp.resend.com'
+  process.env.SMTP_PORT = port
+  process.env.SMTP_USER = 'resend'
+  process.env.SMTP_PASSWORD = 'test-resend-secret'
+  process.env.INVITATION_FROM = 'ProjectFlow <invites@projectflow.example>'
+}
 
 describe('invitation delivery configuration', () => {
   it('returns an explicit preview without claiming an email was sent', async () => {
@@ -37,5 +53,30 @@ describe('invitation delivery configuration', () => {
     delete process.env.INVITATION_FROM
 
     expect(() => invitationDeliveryFromEnv(false)).toThrow('required for SMTP delivery')
+  })
+
+  it.each([
+    ['465', true, false],
+    ['2465', true, false],
+    ['587', false, true],
+    ['2587', false, true],
+  ])('configures Resend port %s with secure=%s and requireTLS=%s', (port, secure, requireTLS) => {
+    configureSmtp(port)
+
+    invitationDeliveryFromEnv(true)
+
+    expect(createTransport).toHaveBeenCalledWith(expect.objectContaining({
+      host: 'smtp.resend.com',
+      port: Number(port),
+      secure,
+      requireTLS,
+    }))
+  })
+
+  it.each(['25', '2525', '0', '70000', 'not-a-port'])('rejects unsafe production SMTP port %s', (port) => {
+    configureSmtp(port)
+
+    expect(() => invitationDeliveryFromEnv(true)).toThrow('Production SMTP_PORT')
+    expect(createTransport).not.toHaveBeenCalled()
   })
 })

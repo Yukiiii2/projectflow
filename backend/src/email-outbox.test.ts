@@ -55,4 +55,34 @@ describe('production email outbox', () => {
     expect(delivered).toBe(false)
     expect(query.mock.calls[0]?.[0]).toContain('expires_at <= now() OR attempts >= 5')
   })
+
+  it('deletes and reports a message when its fifth delivery attempt fails', async () => {
+    const message = { recipient: 'maya@example.com', name: 'Maya', expiresAt: '2026-10-22T12:00:00.000Z', resetUrl: 'https://projectflow.example/reset-password?token=secret' }
+    const enqueueQuery = vi.fn().mockResolvedValue({ rows: [] })
+    await queuedInvitationDelivery({ query: enqueueQuery } as never, key).sendPasswordReset(message)
+    const encrypted = JSON.parse(String(enqueueQuery.mock.calls[0]?.[1]?.[1]))
+    const query = vi.fn()
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ id: 'job-id', kind: 'password_reset', payload: encrypted, attempts: 5 }] })
+      .mockResolvedValueOnce({ rows: [] })
+    const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }
+
+    const delivered = await processNextOutboxMessage(
+      { query } as never,
+      { mode: 'smtp', send: vi.fn(), sendVerification: vi.fn(), sendPasswordReset: vi.fn().mockRejectedValue(new Error('SMTP failed')) } as never,
+      logger,
+      key,
+    )
+
+    expect(delivered).toBe(true)
+    expect(query.mock.calls[2]?.[0]).toContain('DELETE FROM email_outbox')
+    expect(logger.error).toHaveBeenCalledWith('email_outbox_delivery_abandoned', {
+      messageId: 'job-id',
+      kind: 'password_reset',
+      errorName: 'Error',
+      attempts: 5,
+    })
+    expect(logger.warn).not.toHaveBeenCalled()
+    expect(JSON.stringify(logger.error.mock.calls)).not.toContain('secret')
+  })
 })

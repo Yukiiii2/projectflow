@@ -120,6 +120,29 @@ describe('same-origin production app', () => {
 })
 
 describe('structured logging', () => {
+  it('redacts SPA invitation bearer tokens from request logs', async () => {
+    const write = vi.fn()
+    const logger = createLogger({ level: 'info', write })
+    const db = { query: vi.fn().mockResolvedValue({ rows: [] }) } as never
+    const app = createApp({
+      db,
+      logger,
+      sessionStore: new session.MemoryStore(),
+      invitationDelivery: { mode: 'smtp', async send() { return { status: 'sent' } }, async sendVerification() { return { status: 'sent' } }, async sendPasswordReset() { return { status: 'sent' } } },
+      config: {
+        frontendOrigin: 'https://projectflow.example',
+        sessionSecret: 'a-production-session-secret-with-more-than-32-characters',
+        production: true,
+      },
+    })
+
+    await request(app).get('/invite/raw-browser-token').set('X-Forwarded-Proto', 'https').expect(404)
+
+    const requestLog = write.mock.calls.map(([line]) => JSON.parse(line)).find((entry) => entry.event === 'request_completed')
+    expect(requestLog).toMatchObject({ path: '/invite/[REDACTED]', status: 404 })
+    expect(JSON.stringify(requestLog)).not.toContain('raw-browser-token')
+  })
+
   it('redacts credentials, tokens, and sensitive URL segments', () => {
     expect(redactLogValue('postgresql://user:secret@db.example.test/projectflow')).toBe('postgresql://[REDACTED]@db.example.test/projectflow')
     expect(redactLogValue('/api/invitations/raw-token-value?token=another-secret')).toBe('/api/invitations/[REDACTED]')

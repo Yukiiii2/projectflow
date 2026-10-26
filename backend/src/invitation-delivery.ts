@@ -44,6 +44,16 @@ export function previewInvitationDelivery(): InvitationDelivery {
   }
 }
 
+function smtpTransportSecurity(port: number, production: boolean) {
+  if (!Number.isInteger(port) || port < 1 || port > 65_535) {
+    throw new Error('Production SMTP_PORT must be a valid secure SMTP port')
+  }
+  if (port === 465 || port === 2465) return { secure: true, requireTLS: false }
+  if (port === 587 || port === 2587) return { secure: false, requireTLS: true }
+  if (production) throw new Error('Production SMTP_PORT must use Resend SMTPS or STARTTLS')
+  return { secure: false, requireTLS: false }
+}
+
 export function invitationDeliveryFromEnv(production: boolean): InvitationDelivery {
   const mode = process.env.INVITATION_DELIVERY ?? (production ? 'smtp' : 'preview')
   if (mode === 'preview') {
@@ -57,13 +67,14 @@ export function invitationDeliveryFromEnv(production: boolean): InvitationDelive
   const user = process.env.SMTP_USER
   const pass = process.env.SMTP_PASSWORD
   const from = process.env.INVITATION_FROM
-  if (!host || !Number.isInteger(port) || !user || !pass || !from) {
+  if (!host || !user || !pass || !from) {
     throw new Error('SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, and INVITATION_FROM are required for SMTP delivery')
   }
+  const transportSecurity = smtpTransportSecurity(port, production)
   const transport = nodemailer.createTransport({
     host,
     port,
-    secure: port === 465,
+    ...transportSecurity,
     auth: { user, pass },
     connectionTimeout: 10_000,
     greetingTimeout: 10_000,

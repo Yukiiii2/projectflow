@@ -67,6 +67,7 @@ Drain or deliberately purge the outbox before rotating `EMAIL_OUTBOX_KEY`; queue
 ## Monitoring and maintenance
 
 - Alert on failed health checks, deploy failures, repeated 5xx responses, unusual 401/403/429 volume, database limits, and email delivery failures.
+- Alert on the structured `email_outbox_delivery_abandoned` event. It means a queued invitation, verification, or reset message exhausted five transport attempts and was deleted; logs identify only the internal message ID, message kind, error class, and attempt count.
 - Logs are structured JSON and include request ID, method, redacted path, status, duration, and Cloudflare Ray ID where available. Bodies, cookies, credentials, and tokens are not logged.
 - Keep one API instance while rate limits use memory. Add a shared Redis-compatible rate-limit store before horizontal scaling.
 - Remove expired sessions and auth tokens on a scheduled maintenance job after hosted behavior is established.

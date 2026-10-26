@@ -17,6 +17,7 @@ export function redactLogValue(value: string) {
   return withoutQuery
     .replace(/(postgres(?:ql)?:\/\/)[^/@\s]+(?=@)/gi, '$1[REDACTED]')
     .replace(/(\/api\/invitations\/)[^/\s]+/gi, '$1[REDACTED]')
+    .replace(/(\/invite\/)[^/\s]+/gi, '$1[REDACTED]')
     .replace(/(\/verify-email\/)[^/\s]+/gi, '$1[REDACTED]')
     .replace(/(\/reset-password\/)[^/\s]+/gi, '$1[REDACTED]')
     .replace(/\b(re_[A-Za-z0-9_-]{8,}|Bearer\s+\S+)\b/g, '[REDACTED]')
