@@ -163,8 +163,7 @@ Run the checks from the repository root:
 # Frontend
 npm.cmd test
 npm.cmd run typecheck
-npm.cmd run build
-npm.cmd run verify:production-bundle
+npm.cmd run build:frontend
 npm.cmd audit
 
 # Complete production builds
@@ -223,7 +222,7 @@ Completed and locally verified:
 
 ## Deployment readiness
 
-The approved target is one Render Free web service serving both Express `/api` routes and the compiled Vite application, with Neon Free PostgreSQL and the Resend Free HTTPS API. The committed `render.yaml` keeps automatic deploys off and contains no credentials. GitHub Actions runs on Node.js 24 LTS and covers frontend/backend tests, three backend timezone variants, typechecks, builds, high-severity dependency audits, a real PostgreSQL concurrent-migration check, and an isolated `pg_dump`/`pg_restore` recovery rehearsal with a failed-migration rollback probe.
+The approved target is one Render Free web service serving both Express `/api` routes and the compiled Vite application, with Neon Free PostgreSQL and the Resend Free HTTPS API. The committed `render.yaml` contains no credentials and deploys only after the required GitHub checks pass. GitHub Actions runs on Node.js 24 LTS and covers frontend/backend tests, three backend timezone variants, typechecks, full Render artifact builds, high-severity dependency audits, a real PostgreSQL concurrent-migration check, and an isolated `pg_dump`/`pg_restore` recovery rehearsal with a failed-migration rollback probe.
 
 Read [the deployment runbook](./docs/DEPLOYMENT-RUNBOOK.md) and [database recovery procedure](./docs/DATABASE-RECOVERY.md) before creating resources. A hosted deployment still requires explicit approval.
 

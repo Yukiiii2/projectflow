@@ -9,13 +9,13 @@ This runbook prepares the approved single-service architecture. It does not auth
 - Resend supplies transactional email through its HTTPS API, which is compatible with Render Free's SMTP restrictions.
 - Node.js 24 LTS is used by local tooling, GitHub Actions, and Render.
 - GitHub Actions runs tests, typechecks, builds, and high-severity dependency audits.
-- Render auto-deploy remains off until the first manual hosted verification succeeds.
+- Render auto-deploy waits for required GitHub checks to pass; failed checks must never be bypassed for a release.
 
 ## Preflight
 
 1. Confirm `main` passes the GitHub Actions workflow.
 2. Run the complete local commands documented in the repository README.
-3. Run `npm run build:all`; its production-bundle gate must confirm the output contains no localhost API URL, development preview controls, credential-shaped database URL, Resend key, or SMTP password.
+3. Run `npm run build:all`; its gates must confirm both `dist/index.html` and `backend/dist/server.js` exist and that the frontend output contains no localhost API URL, development preview controls, credential-shaped database URL, Resend key, or SMTP password.
 4. Confirm `render.yaml` contains only placeholders and non-secret configuration.
 5. Rehearse the database procedure in [DATABASE-RECOVERY.md](./DATABASE-RECOVERY.md).
 6. Confirm the CI PostgreSQL job completed both concurrent migration verification and the isolated `pg_dump`/`pg_restore` recovery rehearsal.
@@ -29,7 +29,7 @@ This runbook prepares the approved single-service architecture. It does not auth
 4. Create a Resend account, approve a sending domain, and publish the exact SPF/DKIM records Resend provides. Create a sending-only key restricted to the production domain where available; Resend supports sending-scoped API keys ([Resend API key permissions](https://resend.com/changelog/new-api-key-permissions)).
 5. Confirm the sender identity matches `INVITATION_FROM`, then test the Resend HTTPS email API. Each outbox row supplies a stable idempotency key, which Resend retains for 24 hours to prevent duplicate sends during retries ([Resend idempotency keys](https://resend.com/changelog/idempotency-keys)).
 6. Create a Render Blueprint from this repository. Review the proposed Free service, Node.js 24, build/start commands, `/api/health`, environment values, region, and plan before applying it. Confirm `plan: free`, no disk/database/add-on, and no automatic upgrade or paid workspace feature. Accept the documented cold-start, quota, outbound-traffic, no-shell, and ephemeral-filesystem limits ([Render Free limitations](https://render.com/docs/free)). If the account has a payment method, configure available spend controls and alerts before launch; otherwise stop instead of accepting an overage or upgrade prompt.
-7. Keep automatic deploys disabled. Render supports waiting for CI checks before automatic deploys, but enable that only after the first manual release and rollback rehearsal pass ([Render deploys](https://render.com/docs/deploys)).
+7. Confirm `autoDeployTrigger: checksPass` so Render deploys `main` only after GitHub checks succeed. Do not bypass a failed check or manually deploy an unverified commit ([Render deploys](https://render.com/docs/deploys)).
 
 ## Render variables
 
@@ -112,4 +112,4 @@ A hosted release remains **no-go** until every item below has evidence:
 - synthetic full workflow passes through the public HTTPS origin and all test data is removed;
 - rollback decision owner and application/database/email rollback steps are approved.
 
-Until then, keep `autoDeployTrigger: off`, do not add a migration startup hook, do not enable unrestricted public registration, and do not describe the service as production verified.
+Until then, keep `autoDeployTrigger: checksPass`, do not add a migration startup hook, do not enable unrestricted public registration, and do not describe the service as production verified.

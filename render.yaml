@@ -4,8 +4,8 @@ services:
     runtime: node
     plan: free
     region: singapore
-    autoDeployTrigger: off
-    buildCommand: npm ci && npm --prefix backend ci && npm run build:all
+    autoDeployTrigger: checksPass
+    buildCommand: npm ci --include=dev && npm --prefix backend ci --include=dev && npm run build:all && npm prune --omit=dev && npm --prefix backend prune --omit=dev
     startCommand: npm start
     healthCheckPath: /api/health
     envVars:

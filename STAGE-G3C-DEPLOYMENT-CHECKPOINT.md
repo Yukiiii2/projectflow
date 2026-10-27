@@ -4,13 +4,13 @@ Date: 2026-10-27
 
 Target: first controlled deployment on one Render Free web service, Neon Free PostgreSQL, and Resend Free HTTPS API
 
-Status: local readiness verified; no cloud service was created or deployed
+Status: local readiness verified; the first external Render deployment later failed before startup and is covered by the repair addendum below
 
 ## Outcome
 
 ProjectFlow is locally ready for the external-account portion of the first Render Free deployment. The application remains one Express process serving `/api` and the compiled Vite SPA from the same origin. Runtime traffic uses the limited pooled Neon role, migrations use the protected direct migration connection, and all transactional email uses Resend's HTTPS API through the encrypted PostgreSQL outbox.
 
-No Render service, Resend resource, DNS record, paid feature, database reset, production migration, or live deployment was created in this stage.
+At the time of the original checkpoint, no Render service, Resend resource, DNS record, paid feature, database reset, production migration, or live deployment had been created. The user later created the Render Free service and attempted the failed deployment described in the repair addendum; this repository repair does not create or modify provider resources.
 
 ## G3B database finalization
 
@@ -45,7 +45,7 @@ The committed [Render Blueprint](./render.yaml) proposes exactly one service:
 | --- | --- |
 | Type/runtime/plan | Web / Node / Free |
 | Region | Singapore |
-| Automatic deploys | Off |
+| Automatic deploys | After required GitHub checks pass (`checksPass`) |
 | Node | `NODE_VERSION=24` with package engines `>=24 <25` |
 | Build command | `npm ci && npm --prefix backend ci && npm run build:all` |
 | Start command | `npm start` |
@@ -121,7 +121,7 @@ Generated screenshots/reports, compiled output, local environments, and database
 
 ## $0/month safeguards and current limits
 
-- Render: keep the Blueprint at `plan: free`, one instance, no persistent disk, no Render database, no paid add-on, and automatic deploys off. Free web services spin down after 15 minutes without inbound traffic and can take about a minute to wake; the workspace receives a monthly Free instance-hour allotment. Review usage and any spend controls before applying the Blueprint ([Render Free](https://render.com/docs/free)).
+- Render: keep the Blueprint at `plan: free`, one instance, no persistent disk, no Render database, no paid add-on, and automatic deploys gated on successful GitHub checks. Free web services spin down after 15 minutes without inbound traffic and can take about a minute to wake; the workspace receives a monthly Free instance-hour allotment. Review usage and any spend controls before applying the Blueprint ([Render Free](https://render.com/docs/free)).
 - Neon: keep the existing project on the Free plan, preserve the recovery branch/point, and review Free compute, storage, history, and branch usage in the account before launch ([Neon pricing](https://neon.com/pricing)).
 - Resend: keep the account on Free. The published Free allowance is 3,000 emails/month and 100/day; do not enable a paid plan or pay-as-you-go ([Resend pricing](https://resend.com/pricing)).
 
@@ -134,7 +134,7 @@ These actions cross the external-account boundary and were intentionally not per
 1. **Account safety:** sign in to Render and Resend, enable MFA, confirm Neon remains Free, and review provider usage/spend alerts. Do not accept a paid workspace, instance, database, disk, support plan, or automatic upgrade.
 2. **Resend domain:** add and verify a sending domain. Publish only the exact DNS records Resend supplies. Create a sending-only production API key and keep it private. Confirm the chosen `INVITATION_FROM` uses the verified domain.
 3. **Neon release point:** confirm the production branch, database, pooled limited-role URL, direct migration-role URL, and recovery branch/point. Prefer `sslmode=verify-full` when Neon supplies/supports it. Do not change the existing runtime/migration role separation.
-4. **Render Blueprint preview:** connect `Yukiiii2/projectflow`, select `main`, and import `render.yaml`. Before applying, confirm one Singapore **Free** web service, no disk/database/add-on, automatic deploys off, the exact commands and `/api/health`, and Node 24.
+4. **Render Blueprint preview:** connect `Yukiiii2/projectflow`, select `main`, and import `render.yaml`. Before applying, confirm one Singapore **Free** web service, no disk/database/add-on, automatic deploys gated on successful checks, the exact commands and `/api/health`, and Node 24.
 5. **Render secrets:** enter only the six required values listed above. Confirm the forbidden variables are absent. Render supplies `PORT`.
 6. **Protected migration:** from the trusted local operator environment, set the direct `MIGRATION_DATABASE_URL`, create/confirm the recovery point, run `npm --prefix backend run db:migrate`, and run it again to confirm all five migrations are current. Do not run migrations from Render or through the pooled runtime URL.
 7. **Manual deploy:** deploy the exact reviewed `main` commit only after its GitHub Actions workflow is green.
@@ -160,3 +160,9 @@ These actions cross the external-account boundary and were intentionally not per
 - External uptime/error alert routing and the full public-origin workflow remain launch gates.
 
 GitHub synchronization and the resulting CI run are reported separately because a checkpoint cannot contain the hash of the commit that contains itself. No deployment is authorized by this document.
+
+## First Render deployment repair addendum — 2026-10-27
+
+The first external deployment reached the start command but failed with `MODULE_NOT_FOUND` for `backend/dist/server.js`. A clean reproduction proved that the former root `npm run build` compiled only the Vite frontend: `dist/index.html` existed while the compiled Express entry point did not. The former Blueprint command also used plain `npm ci`, which omits build-time development dependencies when `NODE_ENV=production`.
+
+The repair makes the root production build compile both applications, explicitly installs build dependencies during the Render build, prunes them afterward, and fails the build if either `dist/index.html` or `backend/dist/server.js` is missing or the start command points elsewhere. GitHub Actions now exercises this exact full-stack production build with `NODE_ENV=production`. No application feature, database configuration, authentication control, secret, or UI design changed.

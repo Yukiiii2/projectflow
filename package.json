@@ -5,8 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build:frontend": "tsc -b && vite build",
+    "build": "npm run build:frontend && npm --prefix backend run build",
     "verify:production-bundle": "node scripts/verify-production-bundle.mjs",
+    "verify:render-build": "node scripts/verify-render-build.mjs",
     "typecheck": "tsc -b --pretty false",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -17,7 +19,7 @@
     "kanban:qa": "node scripts/kanban-qa.mjs",
     "collaboration:qa": "node scripts/collaboration-qa.mjs",
     "stage-f:qa": "node scripts/stage-f-qa.mjs",
-    "build:all": "npm run build && npm run verify:production-bundle && npm --prefix backend run build",
+    "build:all": "npm run build && npm run verify:production-bundle && npm run verify:render-build",
     "start": "npm --prefix backend start"
   },
   "engines": {
