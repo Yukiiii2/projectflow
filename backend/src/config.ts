@@ -64,7 +64,7 @@ export function loadServerConfig(environment: NodeJS.ProcessEnv): ServerConfig {
   if (production && !requireEmailVerification) throw new Error('Production requires email verification')
   if (production) {
     if (!['resend', 'smtp'].includes(environment.INVITATION_DELIVERY ?? '')) {
-      throw new Error('Production email delivery must use the Resend API or SMTP')
+      throw new Error('Production INVITATION_DELIVERY must be set to resend or smtp')
     }
     if (environment.INVITATION_DELIVERY === 'resend') {
       if (!environment.RESEND_API_KEY || !environment.INVITATION_FROM) throw new Error('Production Resend API configuration is incomplete')

@@ -37,7 +37,10 @@ describe('production readiness configuration', () => {
   it.each([
     ['http frontend', { FRONTEND_ORIGIN: 'http://projectflow.example' }, 'HTTPS'],
     ['unencrypted database', { DATABASE_URL: 'postgresql://user:pass@db.example.test/projectflow' }, 'sslmode=require'],
-    ['preview email', { INVITATION_DELIVERY: 'preview' }, 'email delivery'],
+    ['missing email delivery mode', { INVITATION_DELIVERY: undefined }, 'Production INVITATION_DELIVERY must be set to resend or smtp'],
+    ['mis-cased email delivery mode', { INVITATION_DELIVERY: 'Resend' }, 'Production INVITATION_DELIVERY must be set to resend or smtp'],
+    ['preview email', { INVITATION_DELIVERY: 'preview' }, 'Production INVITATION_DELIVERY must be set to resend or smtp'],
+    ['missing Resend sender', { INVITATION_FROM: undefined }, 'Production Resend API configuration is incomplete'],
     ['disabled verification', { REQUIRE_EMAIL_VERIFICATION: 'false' }, 'email verification'],
     ['invalid proxy hops', { TRUST_PROXY_HOPS: '0' }, 'TRUST_PROXY_HOPS'],
     ['placeholder Resend secret', { RESEND_API_KEY: 'REPLACE_WITH_RESEND_API_KEY' }, 'placeholder'],

@@ -44,6 +44,8 @@ Set secret fields directly in Render. Never place them in GitHub, chat, screensh
 
 The Blueprint supplies non-secret values for Node.js 24, `NODE_ENV`, proxy hops, token lifetimes, `INVITATION_DELIVERY=resend`, and log level. Do not add `MIGRATION_DATABASE_URL` to the Render web service: it belongs only in the protected operator environment while migrations run.
 
+`RESEND_API_KEY` does not select the delivery transport. The Render service must also contain `INVITATION_DELIVERY` with the exact lowercase value `resend`, plus a verified `INVITATION_FROM`. A missing, differently cased, or whitespace-padded selector is rejected before the API key is inspected; never work around that guard with preview delivery in production.
+
 Render supplies `PORT`; do not hard-code or override it. Do not configure `VITE_API_URL`, any `SMTP_*` variable, `MIGRATION_DATABASE_URL`, or a recovery/admin database URL on the web service. The production frontend always uses same-origin `/api` routes.
 
 ## Initial release sequence
