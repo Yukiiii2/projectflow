@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import * as authApi from './api'
-import { sessionExpiredEvent, type AuthUser } from './api'
+import { defaultPublicAvailability, sessionExpiredEvent, type AuthUser, type PublicAvailability } from './api'
 
 type AuthStatus = 'loading' | 'authenticated' | 'unauthenticated'
 
@@ -8,6 +8,7 @@ interface AuthContextValue {
   status: AuthStatus
   user: AuthUser | null
   notice: string
+  availability: PublicAvailability
   clearNotice: () => void
   retrySession: () => Promise<void>
   refreshUser: () => Promise<AuthUser | null>
@@ -24,11 +25,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<AuthStatus>('loading')
   const [user, setUser] = useState<AuthUser | null>(null)
   const [notice, setNotice] = useState('')
+  const [availability, setAvailability] = useState<PublicAvailability>(defaultPublicAvailability)
 
   const loadSession = useCallback(async (initial = false) => {
     if (initial) setStatus('loading')
     try {
-      const restoredUser = await authApi.restoreSession()
+      const restored = await authApi.restoreSession()
+      const restoredUser = restored.user
+      setAvailability(restored.availability)
       if (restoredUser) {
         setUser(restoredUser)
         setStatus('authenticated')
@@ -80,10 +84,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     status,
     user,
     notice,
+    availability,
     clearNotice: () => setNotice(''),
     retrySession: () => loadSession(true),
     refreshUser: async () => {
-      const restoredUser = await authApi.restoreSession()
+      const restored = await authApi.restoreSession()
+      const restoredUser = restored.user
+      setAvailability(restored.availability)
       setUser(restoredUser)
       setStatus(restoredUser ? 'authenticated' : 'unauthenticated')
       return restoredUser
@@ -118,7 +125,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setStatus('unauthenticated')
       }
     },
-  }), [expireSession, loadSession, notice, status, user])
+  }), [availability, expireSession, loadSession, notice, status, user])
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }

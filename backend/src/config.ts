@@ -12,6 +12,7 @@ export interface ServerConfig {
   logLevel: 'debug' | 'info' | 'warn' | 'error'
   emailOutboxKey?: Buffer
   demoModeEnabled: boolean
+  portfolioModeEnabled: boolean
 }
 
 function isPlaceholder(value: string | undefined) {
@@ -67,8 +68,9 @@ export function loadServerConfig(environment: NodeJS.ProcessEnv): ServerConfig {
   if (production && secret === 'REPLACE_WITH_AT_LEAST_32_RANDOM_CHARACTERS') throw new Error('Production SESSION_SECRET must not use the example placeholder')
 
   const requireEmailVerification = boolean(environment.REQUIRE_EMAIL_VERIFICATION, production, 'REQUIRE_EMAIL_VERIFICATION')
+  const portfolioModeEnabled = boolean(environment.PORTFOLIO_MODE_ENABLED, false, 'PORTFOLIO_MODE_ENABLED')
   if (production && !requireEmailVerification) throw new Error('Production requires email verification')
-  if (production) {
+  if (production && !portfolioModeEnabled) {
     if (!['resend', 'smtp'].includes(environment.INVITATION_DELIVERY ?? '')) {
       throw new Error('Production INVITATION_DELIVERY must be set to resend or smtp')
     }
@@ -111,5 +113,6 @@ export function loadServerConfig(environment: NodeJS.ProcessEnv): ServerConfig {
     logLevel: logLevel as ServerConfig['logLevel'],
     emailOutboxKey,
     demoModeEnabled: boolean(environment.DEMO_MODE_ENABLED, false, 'DEMO_MODE_ENABLED'),
+    portfolioModeEnabled,
   }
 }

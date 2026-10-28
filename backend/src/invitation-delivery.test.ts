@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { deliveryErrorLogFields, invitationDeliveryFromEnv, previewInvitationDelivery } from './invitation-delivery.js'
+import { deliveryErrorLogFields, disabledInvitationDelivery, invitationDeliveryFromEnv, previewInvitationDelivery } from './invitation-delivery.js'
 
 const { createTransport } = vi.hoisted(() => ({
   createTransport: vi.fn(() => ({ sendMail: vi.fn() })),
@@ -31,6 +31,18 @@ function configureResendApi() {
 }
 
 describe('invitation delivery configuration', () => {
+  it('provides a fail-closed transport for portfolio mode', async () => {
+    const disabled = disabledInvitationDelivery()
+
+    expect(disabled.mode).toBe('disabled')
+    await expect(disabled.sendVerification({
+      recipient: 'owner@example.test',
+      name: 'Owner',
+      expiresAt: '2026-10-30T00:00:00.000Z',
+      verifyUrl: 'https://projectflow.example/verify-email?token=unreachable',
+    })).rejects.toThrow('disabled in portfolio mode')
+  })
+
   it('returns an explicit preview without claiming an email was sent', async () => {
     const result = await previewInvitationDelivery().send({
       recipient: 'invitee@example.com',

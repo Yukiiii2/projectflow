@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import argon2 from 'argon2'
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import session from 'express-session'
@@ -12,7 +13,7 @@ const origin = 'http://localhost:5173'
 const password = 'correct horse battery staple'
 const pools: Pool[] = []
 
-async function context(emailOutbox?: Parameters<typeof createApp>[0]['emailOutbox']) {
+async function context(emailOutbox?: Parameters<typeof createApp>[0]['emailOutbox'], portfolioModeEnabled = false) {
   const memory = newDb({ autoCreateForeignKeyIndices: true })
   memory.public.registerFunction({ name: 'gen_random_uuid', returns: DataType.uuid, impure: true, implementation: randomUUID })
   const first = await readFile(fileURLToPath(new URL('../sql/001_init.sql', import.meta.url)), 'utf8')
@@ -25,7 +26,7 @@ async function context(emailOutbox?: Parameters<typeof createApp>[0]['emailOutbo
   pools.push(pool)
   return {
     pool,
-    app: createApp({ db: pool, sessionStore: new session.MemoryStore(), emailOutbox, config: { frontendOrigin: origin, sessionSecret: 'test-session-secret-at-least-32-characters', production: false } }),
+    app: createApp({ db: pool, sessionStore: new session.MemoryStore(), emailOutbox, config: { frontendOrigin: origin, sessionSecret: 'test-session-secret-at-least-32-characters', production: false, portfolioModeEnabled } }),
   }
 }
 
@@ -36,6 +37,19 @@ function register(agent: ReturnType<typeof request.agent>, email: string, name: 
 afterEach(async () => { await Promise.all(pools.splice(0).map((pool) => pool.end())) })
 
 describe('Stage E collaboration', () => {
+  it('rejects new portfolio invitations before creating invitation records', async () => {
+    const { app, pool } = await context(undefined, true)
+    await pool.query('INSERT INTO users(name,email,password_hash,email_verified_at) VALUES ($1,$2,$3,now())', ['Existing Owner', 'owner@example.com', await argon2.hash(password)])
+    const owner = request.agent(app)
+    await owner.post('/api/auth/login').set('Origin', origin).send({ email: 'owner@example.com', password }).expect(200)
+    const workspace = (await owner.post('/api/workspaces').set('Origin', origin).send({ name: 'Existing Workspace' }).expect(201)).body.workspace
+
+    const response = await owner.post(`/api/workspaces/${workspace.id}/invitations`).set('Origin', origin).send({ email: 'new-member@example.com', role: 'member' }).expect(503)
+
+    expect(response.body).toEqual({ error: 'Email invitations are unavailable in portfolio mode.', code: 'PORTFOLIO_EMAIL_DISABLED' })
+    expect((await pool.query('SELECT id FROM workspace_invitations WHERE workspace_id=$1', [workspace.id])).rowCount).toBe(0)
+  })
+
   it('enforces the invitation lifecycle and membership role controls', async () => {
     const { app, pool } = await context()
     const owner = request.agent(app); const invitee = request.agent(app); const member = request.agent(app)

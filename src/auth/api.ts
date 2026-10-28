@@ -17,6 +17,40 @@ interface ErrorResponse {
   error?: string
 }
 
+export interface PublicAvailability {
+  portfolioMode: boolean
+  demoAvailable: boolean
+  registrationAvailable: boolean
+  passwordRecoveryAvailable: boolean
+  verificationResendAvailable: boolean
+  emailInvitationsAvailable: boolean
+}
+
+export const defaultPublicAvailability: PublicAvailability = {
+  portfolioMode: false,
+  demoAvailable: true,
+  registrationAvailable: true,
+  passwordRecoveryAvailable: true,
+  verificationResendAvailable: true,
+  emailInvitationsAvailable: true,
+}
+
+function availabilityBoolean(response: Response, header: string, fallback: boolean) {
+  const value = response.headers.get(header)
+  return value === 'true' ? true : value === 'false' ? false : fallback
+}
+
+function availabilityFrom(response: Response): PublicAvailability {
+  return {
+    portfolioMode: availabilityBoolean(response, 'X-ProjectFlow-Portfolio-Mode', defaultPublicAvailability.portfolioMode),
+    demoAvailable: availabilityBoolean(response, 'X-ProjectFlow-Demo-Available', defaultPublicAvailability.demoAvailable),
+    registrationAvailable: availabilityBoolean(response, 'X-ProjectFlow-Registration-Available', defaultPublicAvailability.registrationAvailable),
+    passwordRecoveryAvailable: availabilityBoolean(response, 'X-ProjectFlow-Password-Recovery-Available', defaultPublicAvailability.passwordRecoveryAvailable),
+    verificationResendAvailable: availabilityBoolean(response, 'X-ProjectFlow-Verification-Resend-Available', defaultPublicAvailability.verificationResendAvailable),
+    emailInvitationsAvailable: availabilityBoolean(response, 'X-ProjectFlow-Email-Invitations-Available', defaultPublicAvailability.emailInvitationsAvailable),
+  }
+}
+
 export function resolveApiBaseUrl(configured: string | undefined, fallback: string) {
   return (configured ?? fallback).replace(/\/$/, '')
 }
@@ -48,6 +82,7 @@ export async function apiRequest<T>(
   path: string,
   init: RequestInit = {},
   messages: Partial<Record<number, string>> = {},
+  onResponse?: (response: Response) => void,
 ): Promise<T> {
   let response: Response
   try {
@@ -62,6 +97,8 @@ export async function apiRequest<T>(
   } catch {
     throw new ApiError(0, 'Could not reach the ProjectFlow API. Confirm the backend is running and try again.')
   }
+
+  onResponse?.(response)
 
   if (response.status === 204) return undefined as T
 
@@ -86,11 +123,12 @@ export async function apiRequest<T>(
 }
 
 export async function restoreSession() {
+  let availability = defaultPublicAvailability
   try {
-    const response = await apiRequest<AuthResponse>('/api/auth/me')
-    return response.user
+    const response = await apiRequest<AuthResponse>('/api/auth/me', {}, {}, (raw) => { availability = availabilityFrom(raw) })
+    return { user: response.user, availability }
   } catch (error) {
-    if (error instanceof ApiError && error.status === 401) return null
+    if (error instanceof ApiError && error.status === 401) return { user: null, availability }
     throw error
   }
 }

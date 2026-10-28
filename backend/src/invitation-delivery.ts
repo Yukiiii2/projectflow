@@ -33,10 +33,22 @@ export interface DeliveryOptions {
 }
 
 export interface InvitationDelivery {
-  mode: 'preview' | 'resend' | 'smtp'
+  mode: 'disabled' | 'preview' | 'resend' | 'smtp'
   send(message: InvitationMessage, options?: DeliveryOptions): Promise<InvitationDeliveryResult>
   sendVerification(message: VerificationMessage, options?: DeliveryOptions): Promise<InvitationDeliveryResult>
   sendPasswordReset(message: PasswordResetMessage, options?: DeliveryOptions): Promise<InvitationDeliveryResult>
+}
+
+export function disabledInvitationDelivery(): InvitationDelivery {
+  const unavailable = async (): Promise<InvitationDeliveryResult> => {
+    throw new Error('Email delivery is disabled in portfolio mode')
+  }
+  return {
+    mode: 'disabled',
+    send: unavailable,
+    sendVerification: unavailable,
+    sendPasswordReset: unavailable,
+  }
 }
 
 export function previewInvitationDelivery(): InvitationDelivery {

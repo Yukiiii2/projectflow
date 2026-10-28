@@ -114,7 +114,7 @@ function WorkPreview() {
 export function AuthPage({ mode, theme, onToggleTheme }: AuthPageProps) {
   const navigate = useNavigate()
   const location = useLocation()
-  const { login, createAccount, enterDemo, notice, clearNotice, retrySession } = useAuth()
+  const { login, createAccount, enterDemo, notice, clearNotice, retrySession, availability } = useAuth()
   const [values, setValues] = useState<Record<FieldName, string>>({ name: '', email: '', password: '', confirmPassword: '' })
   const [errors, setErrors] = useState<FieldErrors>({})
   const [formError, setFormError] = useState('')
@@ -122,6 +122,7 @@ export function AuthPage({ mode, theme, onToggleTheme }: AuthPageProps) {
   const [submitting, setSubmitting] = useState(false)
   const [demoSubmitting, setDemoSubmitting] = useState(false)
   const isRegister = mode === 'register'
+  const registrationUnavailable = isRegister && !availability.registrationAvailable
   const state = location.state as { from?: string } | null
   const routeMessage = (location.state as { message?: string } | null)?.message ?? ''
   const destination = state?.from?.startsWith('/') ? state.from : '/'
@@ -158,6 +159,7 @@ export function AuthPage({ mode, theme, onToggleTheme }: AuthPageProps) {
   }
 
   const tryDemo = async () => {
+    if (!availability.demoAvailable) return
     setDemoSubmitting(true)
     setFormError('')
     try {
@@ -195,9 +197,11 @@ export function AuthPage({ mode, theme, onToggleTheme }: AuthPageProps) {
 
         <section className="auth-panel" aria-labelledby="auth-title">
           <div className="auth-panel__heading">
-            <h2 id="auth-title">{isRegister ? 'Create your account' : 'Welcome back'}</h2>
-            <p>{isRegister ? 'Start with your details. You can create a workspace next.' : 'Sign in to continue to your ProjectFlow workspace.'}</p>
+            <h2 id="auth-title">{registrationUnavailable ? 'Registration unavailable' : isRegister ? 'Create your account' : 'Welcome back'}</h2>
+            <p>{registrationUnavailable ? 'ProjectFlow is currently available through its private live demo.' : isRegister ? 'Start with your details. You can create a workspace next.' : 'Sign in to continue to your ProjectFlow workspace.'}</p>
           </div>
+
+          {availability.portfolioMode && <div className="auth-alert" role="status"><AlertCircle size={18} aria-hidden="true" /><span>{registrationUnavailable ? 'New accounts are unavailable in portfolio mode. Use the private live demo instead.' : 'ProjectFlow is running in portfolio mode. New accounts and email-based recovery are unavailable; use the private live demo.'}</span></div>}
 
           {(notice || formError || routeMessage) && (
             <div className={`auth-alert ${routeMessage && !formError && !notice ? 'is-success' : ''}`} role="alert">
@@ -212,7 +216,7 @@ export function AuthPage({ mode, theme, onToggleTheme }: AuthPageProps) {
             </div>
           )}
 
-          <form className="auth-form" noValidate onSubmit={submit}>
+          {!registrationUnavailable && <form className="auth-form" noValidate onSubmit={submit}>
             {isRegister && (
               <Field
                 id="name"
@@ -234,7 +238,7 @@ export function AuthPage({ mode, theme, onToggleTheme }: AuthPageProps) {
               onChange={(value) => update('email', value)}
               onBlur={() => validateOne('email')}
             />
-            {!isRegister && <Link className="auth-forgot-link" to="/forgot-password">Forgot password?</Link>}
+            {!isRegister && availability.passwordRecoveryAvailable && <Link className="auth-forgot-link" to="/forgot-password">Forgot password?</Link>}
             <Field
               id="password"
               label="Password"
@@ -272,23 +276,21 @@ export function AuthPage({ mode, theme, onToggleTheme }: AuthPageProps) {
               {submitting && <LoaderCircle className="spin" size={17} aria-hidden="true" />}
               {submitting ? (isRegister ? 'Creating account…' : 'Signing in…') : (isRegister ? 'Create account' : 'Sign in')}
             </button>
-          </form>
+          </form>}
 
           {!isRegister && <div className="auth-demo">
             <div className="auth-demo__divider"><span>or explore without an account</span></div>
-            <button type="button" className="button button--secondary auth-demo__button" disabled={submitting || demoSubmitting} onClick={() => void tryDemo()}>
+            <button type="button" className="button button--secondary auth-demo__button" disabled={submitting || demoSubmitting || !availability.demoAvailable} onClick={() => void tryDemo()}>
               {demoSubmitting ? <LoaderCircle className="spin" size={17} aria-hidden="true" /> : <PlayCircle size={18} aria-hidden="true" />}
-              {demoSubmitting ? 'Preparing your demo…' : 'Try Demo'}
+              {demoSubmitting ? 'Preparing your demo…' : availability.demoAvailable ? 'Try Demo' : 'Demo unavailable'}
             </button>
             <p>Your private demo workspace is writable and is cleared after 30 minutes.</p>
           </div>}
 
-          <p className="auth-switch">
+          {(isRegister || availability.registrationAvailable) && <p className="auth-switch">
             {isRegister ? 'Already have an account?' : 'New to ProjectFlow?'}{' '}
-            <Link to={isRegister ? '/login' : '/register'} state={location.state}>
-              {isRegister ? 'Sign in' : 'Create an account'}
-            </Link>
-          </p>
+            <Link to={isRegister ? '/login' : '/register'} state={location.state}>{isRegister ? 'Sign in' : 'Create an account'}</Link>
+          </p>}
         </section>
       </main>
     </div>

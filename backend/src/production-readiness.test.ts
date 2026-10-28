@@ -6,6 +6,7 @@ import request from 'supertest'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createApp } from './app.js'
 import { loadServerConfig } from './config.js'
+import { disabledInvitationDelivery } from './invitation-delivery.js'
 import { createLogger, redactLogValue } from './logger.js'
 
 const temporaryDirectories: string[] = []
@@ -31,7 +32,26 @@ describe('production readiness configuration', () => {
       EMAIL_OUTBOX_KEY: outboxKey,
     })
 
-    expect(config).toMatchObject({ production: true, port: 10000, trustProxyHops: 1, requireEmailVerification: true })
+    expect(config).toMatchObject({ production: true, port: 10000, trustProxyHops: 1, requireEmailVerification: true, portfolioModeEnabled: false })
+  })
+
+  it('accepts explicit portfolio mode without an email provider while preserving verification', () => {
+    const config = loadServerConfig({
+      NODE_ENV: 'production',
+      DATABASE_URL: 'postgresql://projectflow:test-database-password@pooler.example.test/projectflow?sslmode=require',
+      SESSION_SECRET: 'a-production-session-secret-with-more-than-32-characters',
+      FRONTEND_ORIGIN: 'https://projectflow.example',
+      REQUIRE_EMAIL_VERIFICATION: 'true',
+      TRUST_PROXY_HOPS: '1',
+      PORTFOLIO_MODE_ENABLED: 'true',
+    })
+
+    expect(config).toMatchObject({
+      production: true,
+      requireEmailVerification: true,
+      portfolioModeEnabled: true,
+      emailOutboxKey: undefined,
+    })
   })
 
   it.each([
@@ -45,6 +65,7 @@ describe('production readiness configuration', () => {
     ['disabled verification', { REQUIRE_EMAIL_VERIFICATION: 'false' }, 'email verification'],
     ['invalid proxy hops', { TRUST_PROXY_HOPS: '0' }, 'TRUST_PROXY_HOPS'],
     ['invalid demo switch', { DEMO_MODE_ENABLED: 'yes' }, 'DEMO_MODE_ENABLED'],
+    ['invalid portfolio switch', { PORTFOLIO_MODE_ENABLED: 'yes' }, 'PORTFOLIO_MODE_ENABLED'],
     ['placeholder Resend secret', { RESEND_API_KEY: 'REPLACE_WITH_RESEND_API_KEY' }, 'placeholder'],
     ['invalid outbox key', { EMAIL_OUTBOX_KEY: 'not-a-32-byte-key' }, 'EMAIL_OUTBOX_KEY'],
   ])('rejects %s in production', (_label, override, message) => {
@@ -77,6 +98,25 @@ describe('production readiness configuration', () => {
 })
 
 describe('same-origin production app', () => {
+  it('requires the disabled transport only for explicit production portfolio mode', () => {
+    const db = { query: vi.fn().mockResolvedValue({ rows: [] }) } as never
+    const base = {
+      db,
+      sessionStore: new session.MemoryStore(),
+      config: {
+        frontendOrigin: 'https://projectflow.example',
+        sessionSecret: 'a-production-session-secret-with-more-than-32-characters',
+        production: true,
+        requireEmailVerification: true,
+      },
+    }
+    const resendDelivery = { mode: 'resend' as const, async send() { return { status: 'sent' as const } }, async sendVerification() { return { status: 'sent' as const } }, async sendPasswordReset() { return { status: 'sent' as const } } }
+
+    expect(() => createApp({ ...base, invitationDelivery: disabledInvitationDelivery() })).toThrow('configured email transport')
+    expect(() => createApp({ ...base, invitationDelivery: resendDelivery, config: { ...base.config, portfolioModeEnabled: true } })).toThrow('must disable email delivery')
+    expect(() => createApp({ ...base, invitationDelivery: disabledInvitationDelivery(), config: { ...base.config, portfolioModeEnabled: true } })).not.toThrow()
+  })
+
   it('serves Vite assets and SPA routes without shadowing API 404s', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'projectflow-static-'))
     temporaryDirectories.push(directory)

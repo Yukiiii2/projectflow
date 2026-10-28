@@ -20,6 +20,7 @@ interface CollaborationOptions {
   emailOutbox?: EmailOutbox
   frontendOrigin: string
   invitationTtlHours: number
+  emailInvitationsAvailable: boolean
 }
 
 const uuid = z.string().uuid()
@@ -66,7 +67,7 @@ export async function recordActivity(db: Pool, input: {
 }
 
 export function registerCollaborationRoutes(app: Express, options: CollaborationOptions) {
-  const { db, requireUser, wrap, membership, projectAccess, delivery, emailOutbox, frontendOrigin, invitationTtlHours } = options
+  const { db, requireUser, wrap, membership, projectAccess, delivery, emailOutbox, frontendOrigin, invitationTtlHours, emailInvitationsAvailable } = options
 
   async function actorRole(req: Request, res: Response, workspaceId: string) {
     const role = await membership(req.session.userId!, workspaceId)
@@ -99,6 +100,7 @@ export function registerCollaborationRoutes(app: Express, options: Collaboration
     const actor = await actorRole(req, res, workspaceId)
     if (!actor) return
     if (!['owner', 'admin'].includes(actor)) { res.status(403).json({ error: 'Insufficient permissions' }); return }
+    if (!emailInvitationsAvailable) { res.status(503).json({ error: 'Email invitations are unavailable in portfolio mode.', code: 'PORTFOLIO_EMAIL_DISABLED' }); return }
     const body = invitationInput.parse(req.body)
     if (actor === 'admin' && body.role !== 'member') { res.status(403).json({ error: 'Admins can invite members only' }); return }
     const existing = await db.query('SELECT 1 FROM workspace_members m JOIN users u ON u.id=m.user_id WHERE m.workspace_id=$1 AND u.email=$2', [workspaceId, body.email])

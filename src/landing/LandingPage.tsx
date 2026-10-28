@@ -70,7 +70,7 @@ const features: Feature[] = [
 ]
 
 export function LandingPage() {
-  const { enterDemo } = useAuth()
+  const { enterDemo, availability } = useAuth()
   const [demoLoading, setDemoLoading] = useState(false)
   const [demoError, setDemoError] = useState('')
   const [mobileOpen, setMobileOpen] = useState(false)
@@ -95,7 +95,7 @@ export function LandingPage() {
   }
 
   const openDemo = async () => {
-    if (demoLoading) return
+    if (demoLoading || !availability.demoAvailable) return
     setDemoLoading(true)
     setDemoError('')
     try {
@@ -108,9 +108,9 @@ export function LandingPage() {
   }
 
   const demoButton = (className: string) => (
-    <button className={className} type="button" onClick={() => void openDemo()} disabled={demoLoading}>
+    <button className={className} type="button" onClick={() => void openDemo()} disabled={demoLoading || !availability.demoAvailable}>
       {demoLoading ? <LoaderCircle className="spin" size={18} aria-hidden="true" /> : <CirclePlay size={18} aria-hidden="true" />}
-      {demoLoading ? 'Preparing your demo…' : 'Try Live Demo'}
+      {demoLoading ? 'Preparing your demo…' : availability.demoAvailable ? 'Try Live Demo' : 'Demo unavailable'}
     </button>
   )
 
@@ -178,7 +178,7 @@ export function LandingPage() {
                   Explore Features <ArrowRight size={17} aria-hidden="true" />
                 </a>
               </div>
-              <p className="landing-hero__note"><LockKeyhole size={15} aria-hidden="true" /> No registration required. Your private demo is cleared after 30 minutes.</p>
+              <p className="landing-hero__note"><LockKeyhole size={15} aria-hidden="true" /> {availability.portfolioMode ? 'Portfolio mode: new accounts and email-based recovery are unavailable. Use the private live demo.' : 'No registration required. Your private demo is cleared after 30 minutes.'}</p>
               {demoError && <p className="landing-demo-error" role="alert">{demoError}</p>}
             </div>
 
@@ -328,7 +328,7 @@ export function LandingPage() {
             <a href="#features">Features</a>
             <a href="#how-it-works">How It Works</a>
             <Link to="/login">Sign in</Link>
-            <Link to="/register">Create an account</Link>
+            {availability.registrationAvailable && <Link to="/register">Create an account</Link>}
             <a href="https://github.com/Yukiiii2/projectflow" target="_blank" rel="noreferrer">View source on GitHub <Github size={15} aria-hidden="true" /></a>
           </nav>
         </div>

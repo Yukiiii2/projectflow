@@ -15,7 +15,7 @@ import type { EmailOutbox } from './email-outbox.js';
 import { createDemoInstance, deleteDemoInstance, DemoCapacityError, DemoExpiredError, DemoQuotaError, DEMO_LIMITS, withDemoQuota } from './demo.js';
 
 declare module 'express-session' { interface SessionData { userId?: string; sessionVersion?: number } }
-export interface AppConfig { frontendOrigin: string; sessionSecret: string; production: boolean; invitationTtlHours?: number; verificationTtlMinutes?: number; passwordResetTtlMinutes?: number; trustProxyHops?: number; requireEmailVerification?: boolean; recoveryResponseFloorMs?: number; demoModeEnabled?: boolean }
+export interface AppConfig { frontendOrigin: string; sessionSecret: string; production: boolean; invitationTtlHours?: number; verificationTtlMinutes?: number; passwordResetTtlMinutes?: number; trustProxyHops?: number; requireEmailVerification?: boolean; recoveryResponseFloorMs?: number; demoModeEnabled?: boolean; portfolioModeEnabled?: boolean }
 export interface AppOptions { db: Pool; sessionStore: Store; config: AppConfig; invitationDelivery?: InvitationDelivery; emailOutbox?: EmailOutbox; staticAssetsPath?: string; logger?: Logger }
 
 const id = z.string().uuid();
@@ -101,8 +101,10 @@ export function createApp({ db, sessionStore, config, invitationDelivery = previ
   const verificationTtlMinutes = config.verificationTtlMinutes ?? 1440;
   const passwordResetTtlMinutes = config.passwordResetTtlMinutes ?? 60;
   const recoveryResponseFloorMs = config.recoveryResponseFloorMs ?? (config.production ? 250 : 0);
+  const portfolioModeEnabled = config.portfolioModeEnabled ?? false;
   if (!Number.isFinite(invitationTtlHours) || invitationTtlHours < 1 || invitationTtlHours > 720) throw new Error('Invitation TTL must be between 1 and 720 hours');
-  if (config.production && invitationDelivery.mode === 'preview') throw new Error('Production invitation delivery must use a configured email transport');
+  if (config.production && !portfolioModeEnabled && ['preview', 'disabled'].includes(invitationDelivery.mode)) throw new Error('Production invitation delivery must use a configured email transport');
+  if (config.production && portfolioModeEnabled && invitationDelivery.mode !== 'disabled') throw new Error('Production portfolio mode must disable email delivery');
   const app = express();
   const sessionCookieName = config.production ? '__Host-projectflow.sid' : 'projectflow.sid';
   const cookie = { httpOnly: true, secure: config.production, sameSite: 'lax' as const, maxAge: 604800000, path: '/', priority: 'high' as const };
@@ -137,7 +139,27 @@ export function createApp({ db, sessionStore, config, invitationDelivery = previ
     }
     res.status(400).json({ error: 'HTTPS required' });
   });
-  app.use(cors({ origin: config.frontendOrigin, credentials: true }));
+  const availabilityHeaders = [
+    'X-ProjectFlow-Portfolio-Mode',
+    'X-ProjectFlow-Demo-Available',
+    'X-ProjectFlow-Registration-Available',
+    'X-ProjectFlow-Password-Recovery-Available',
+    'X-ProjectFlow-Verification-Resend-Available',
+    'X-ProjectFlow-Email-Invitations-Available',
+  ]
+  app.use(cors({ origin: config.frontendOrigin, credentials: true, exposedHeaders: availabilityHeaders }));
+  app.use((_req, res, next) => {
+    const emailFeaturesAvailable = !portfolioModeEnabled
+    res.set({
+      'X-ProjectFlow-Portfolio-Mode': String(portfolioModeEnabled),
+      'X-ProjectFlow-Demo-Available': String(Boolean(config.demoModeEnabled)),
+      'X-ProjectFlow-Registration-Available': String(emailFeaturesAvailable),
+      'X-ProjectFlow-Password-Recovery-Available': String(emailFeaturesAvailable),
+      'X-ProjectFlow-Verification-Resend-Available': String(emailFeaturesAvailable),
+      'X-ProjectFlow-Email-Invitations-Available': String(emailFeaturesAvailable),
+    })
+    next()
+  });
   app.use(express.json({ limit: '64kb' }));
   app.use((req, res, next) => {
     if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
@@ -241,8 +263,15 @@ export function createApp({ db, sessionStore, config, invitationDelivery = previ
     return Boolean(await membership(assigneeId, workspaceId));
   }
 
+  function rejectPortfolioEmail(res: Response, error: string) {
+    if (!portfolioModeEnabled) return false
+    res.status(503).json({ error, code: 'PORTFOLIO_EMAIL_DISABLED' })
+    return true
+  }
+
   app.get('/api/health', wrap(async (_req, res) => { await db.query('SELECT 1'); res.json({ status: 'ok' }); }));
   app.post('/api/auth/register', registrationLimiter, wrap(async (req, res) => {
+    if (rejectPortfolioEmail(res, 'Account registration is unavailable in portfolio mode. Try the live demo instead.')) return
     const body = signup.parse(req.body);
     const hash = await argon2.hash(body.password, { type: argon2.argon2id });
     const client = await db.connect();
@@ -328,6 +357,7 @@ export function createApp({ db, sessionStore, config, invitationDelivery = previ
   }));
   app.post('/api/auth/email-verification/request', requireSession, recoveryLimiter, wrap(async (req, res) => {
     if (demoInstanceId(res)) { res.status(403).json({ error: 'Demo accounts cannot manage verification' }); return; }
+    if (rejectPortfolioEmail(res, 'Verification email resend is unavailable in portfolio mode.')) return
     const result = await db.query<{ id: string; name: string; email: string; email_verified_at: string | null }>('SELECT id,name,email,email_verified_at FROM users WHERE id=$1', [req.session.userId]);
     const user = result.rows[0];
     if (!user) { res.status(401).json({ error: 'Sign in required' }); return; }
@@ -355,6 +385,7 @@ export function createApp({ db, sessionStore, config, invitationDelivery = previ
     } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
   }));
   app.post('/api/auth/password-reset/request', recoveryLimiter, wrap(async (req, res) => {
+    if (rejectPortfolioEmail(res, 'Password recovery is unavailable in portfolio mode.')) return
     const responseStartedAt = Date.now();
     const { email } = emailOnly.parse(req.body);
     const result = await db.query<{ id: string; name: string; email: string }>('SELECT id,name,email FROM users WHERE email=$1 AND demo_instance_id IS NULL', [email]);
@@ -490,7 +521,7 @@ export function createApp({ db, sessionStore, config, invitationDelivery = previ
     await recordActivity(db, { workspaceId: access.workspace_id, projectId: task.rows[0]!.project_id, taskId, actorId: req.session.userId!, action: 'task.updated', metadata: { fields: Object.keys(updates), status: updatedTask?.status, priority: updatedTask?.priority, assigneeId: updatedTask?.assignee_id } });
     res.json({ task: updatedTask });
   }));
-  registerCollaborationRoutes(app, { db, requireUser, wrap, membership, projectAccess, delivery: invitationDelivery, emailOutbox, frontendOrigin: config.frontendOrigin, invitationTtlHours });
+  registerCollaborationRoutes(app, { db, requireUser, wrap, membership, projectAccess, delivery: invitationDelivery, emailOutbox, frontendOrigin: config.frontendOrigin, invitationTtlHours, emailInvitationsAvailable: !portfolioModeEnabled });
   app.use('/api', (_req, res) => res.status(404).json({ error: 'Route not found' }));
   if (staticAssetsPath) {
     app.use(express.static(staticAssetsPath, {

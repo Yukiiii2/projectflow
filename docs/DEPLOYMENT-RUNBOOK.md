@@ -46,6 +46,19 @@ The Blueprint supplies non-secret values for Node.js 24, `NODE_ENV`, proxy hops,
 
 `RESEND_API_KEY` does not select the delivery transport. The Render service must also contain `INVITATION_DELIVERY` with the exact lowercase value `resend`, plus a verified `INVITATION_FROM`. A missing, differently cased, or whitespace-padded selector is rejected before the API key is inspected; never work around that guard with preview delivery in production.
 
+### Portfolio deployment without outbound email
+
+`PORTFOLIO_MODE_ENABLED=true` is an explicit server-side policy for the public portfolio service. It permits startup without a usable email provider only by disabling every public workflow that would create new outbound email: ordinary registration, password-reset requests, verification resend, and new external invitations. Existing login and protected APIs continue to work; already-issued verification, reset, and invitation links remain consumable; production email verification is never bypassed.
+
+The flag defaults to false and accepts only `true` or `false`. Missing, false, or malformed values preserve the normal production requirement for Resend/SMTP and a verified sender. Portfolio mode uses a disabled transport, starts no outbox worker, and never exposes preview or capture delivery.
+
+Controlled activation order:
+
+1. Keep `DEMO_MODE_ENABLED=false` while preparing the verified release.
+2. Set `PORTFOLIO_MODE_ENABLED=true` on the existing service, deploy or redeploy the verified commit, and verify startup, `/api/health`, landing/login routes, and the four HTTP 503 email-policy gates while demo mode remains false. With an unverified sender, deploying first with portfolio mode false will correctly fail closed and leave the previous healthy release active.
+3. Set `DEMO_MODE_ENABLED=true`, verify restart health, then run one disposable demo smoke test and log out to delete its temporary workspace.
+4. Roll back by setting `DEMO_MODE_ENABLED=false` first. To return to normal email mode, configure a verified sender and working provider before setting `PORTFOLIO_MODE_ENABLED=false`; otherwise startup will correctly fail.
+
 Render supplies `PORT`; do not hard-code or override it. Do not configure `VITE_API_URL`, any `SMTP_*` variable, `MIGRATION_DATABASE_URL`, or a recovery/admin database URL on the web service. The production frontend always uses same-origin `/api` routes.
 
 ## Initial release sequence

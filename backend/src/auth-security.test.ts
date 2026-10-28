@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto'
+import argon2 from 'argon2'
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import session from 'express-session'
 import { DataType, newDb } from 'pg-mem'
 import type { Pool } from 'pg'
 import request from 'supertest'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createApp } from './app.js'
 import { issueAuthToken } from './auth-tokens.js'
 import type { InvitationDelivery, VerificationMessage, PasswordResetMessage } from './invitation-delivery.js'
@@ -29,7 +30,7 @@ class CapturingDelivery implements InvitationDelivery {
   }
 }
 
-async function context(requireEmailVerification = true, emailOutbox?: Parameters<typeof createApp>[0]['emailOutbox']) {
+async function context(requireEmailVerification = true, emailOutbox?: Parameters<typeof createApp>[0]['emailOutbox'], portfolioModeEnabled = false) {
   const memory = newDb({ autoCreateForeignKeyIndices: true })
   memory.public.registerFunction({ name: 'gen_random_uuid', returns: DataType.uuid, impure: true, implementation: randomUUID })
   const files = await Promise.all(['001_init.sql', '002_collaboration.sql', '003_account_security.sql', '006_portfolio_demo.sql'].map((name) => readFile(fileURLToPath(new URL(`../sql/${name}`, import.meta.url)), 'utf8')))
@@ -51,6 +52,7 @@ async function context(requireEmailVerification = true, emailOutbox?: Parameters
       requireEmailVerification,
       verificationTtlMinutes: 60,
       passwordResetTtlMinutes: 30,
+      portfolioModeEnabled,
     },
   })
   return { app, pool, delivery }
@@ -63,6 +65,46 @@ function tokenFrom(url: string) {
 afterEach(async () => { await Promise.all(pools.splice(0).map((pool) => pool.end())) })
 
 describe('account verification and recovery', () => {
+  it('rejects portfolio registration before creating a user or verification token', async () => {
+    const enqueue = vi.fn()
+    const { app, pool } = await context(true, { enqueue } as never, true)
+
+    const response = await request(app).post('/api/auth/register').set('Origin', origin).send({ name: 'Portfolio User', email: 'portfolio@example.com', password }).expect(503)
+
+    expect(response.body).toEqual({ error: 'Account registration is unavailable in portfolio mode. Try the live demo instead.', code: 'PORTFOLIO_EMAIL_DISABLED' })
+    expect(response.headers['x-projectflow-portfolio-mode']).toBe('true')
+    expect(response.headers['x-projectflow-registration-available']).toBe('false')
+    expect((await pool.query('SELECT id FROM users')).rowCount).toBe(0)
+    expect((await pool.query('SELECT id FROM auth_tokens')).rowCount).toBe(0)
+    expect(enqueue).not.toHaveBeenCalled()
+  })
+
+  it('rejects portfolio recovery requests before creating tokens or outbox work', async () => {
+    const enqueue = vi.fn()
+    const { app, pool } = await context(true, { enqueue } as never, true)
+    await pool.query('INSERT INTO users(name,email,password_hash) VALUES ($1,$2,$3)', ['Existing User', 'existing@example.com', await argon2.hash(password)])
+
+    const response = await request(app).post('/api/auth/password-reset/request').set('Origin', origin).send({ email: 'existing@example.com' }).expect(503)
+
+    expect(response.body).toEqual({ error: 'Password recovery is unavailable in portfolio mode.', code: 'PORTFOLIO_EMAIL_DISABLED' })
+    expect((await pool.query("SELECT id FROM auth_tokens WHERE purpose='password_reset'")).rowCount).toBe(0)
+    expect(enqueue).not.toHaveBeenCalled()
+  })
+
+  it('keeps login available but rejects portfolio verification resend without issuing a token', async () => {
+    const enqueue = vi.fn()
+    const { app, pool } = await context(true, { enqueue } as never, true)
+    await pool.query('INSERT INTO users(name,email,password_hash) VALUES ($1,$2,$3)', ['Existing User', 'existing@example.com', await argon2.hash(password)])
+    const agent = request.agent(app)
+    await agent.post('/api/auth/login').set('Origin', origin).send({ email: 'existing@example.com', password }).expect(200)
+
+    const response = await agent.post('/api/auth/email-verification/request').set('Origin', origin).expect(503)
+
+    expect(response.body).toEqual({ error: 'Verification email resend is unavailable in portfolio mode.', code: 'PORTFOLIO_EMAIL_DISABLED' })
+    expect((await pool.query("SELECT id FROM auth_tokens WHERE purpose='email_verification'")).rowCount).toBe(0)
+    expect(enqueue).not.toHaveBeenCalled()
+  })
+
   it('stores only a hash of the verification token and unlocks protected APIs once', async () => {
     const { app, pool, delivery } = await context()
     const agent = request.agent(app)

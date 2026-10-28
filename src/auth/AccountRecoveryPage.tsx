@@ -36,6 +36,7 @@ function Alert({ message, success = false }: { message: string; success?: boolea
 }
 
 export function ForgotPasswordPage(props: PageProps) {
+  const { availability } = useAuth()
   const [email, setEmail] = useState('')
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
@@ -48,6 +49,10 @@ export function ForgotPasswordPage(props: PageProps) {
     catch (requestError) { setError(requestError instanceof ApiError ? requestError.message : 'Could not request a reset link.') }
     finally { setSubmitting(false) }
   }
+  if (!availability.passwordRecoveryAvailable) return <Shell {...props} title="Password recovery unavailable" description="Email-based password recovery is unavailable while ProjectFlow is running in portfolio mode.">
+    <Alert message="Existing users can still sign in. Portfolio visitors can use the private live demo without an account." />
+    <p className="auth-switch"><Link to="/login">Back to sign in</Link></p>
+  </Shell>
   return <Shell {...props} title="Reset your password" description="Enter your account email. We’ll send a time-limited reset link if it matches an account.">
     <Alert message={error || message} success={Boolean(message && !error)} />
     <form className="auth-form" noValidate onSubmit={submit}>
@@ -88,7 +93,7 @@ export function ResetPasswordPage(props: PageProps) {
 }
 
 export function VerifyEmailPage(props: PageProps) {
-  const { status, user, refreshUser } = useAuth()
+  const { status, user, refreshUser, availability } = useAuth()
   const [params] = useSearchParams()
   const navigate = useNavigate()
   const token = params.get('token') ?? ''
@@ -110,11 +115,12 @@ export function VerifyEmailPage(props: PageProps) {
     } catch (requestError) { setError(requestError instanceof ApiError ? requestError.message : 'Could not complete email verification.') }
     finally { setSubmitting(false) }
   }
-  return <Shell {...props} title="Verify your email" description={token ? 'Confirm this address to finish securing your ProjectFlow account.' : `We sent a verification link to ${user?.email ?? 'your email address'}.`}>
-    <Alert message={error || message} success={Boolean(message && !error)} />
-    <button className="button button--primary auth-submit" type="button" disabled={submitting || (!token && status !== 'authenticated')} onClick={() => void act()}>
+  const resendUnavailable = !token && !availability.verificationResendAvailable
+  return <Shell {...props} title="Verify your email" description={token ? 'Confirm this address to finish securing your ProjectFlow account.' : resendUnavailable ? 'Verification email resend is unavailable in portfolio mode.' : `We sent a verification link to ${user?.email ?? 'your email address'}.`}>
+    <Alert message={error || message || (resendUnavailable ? 'Use an existing verification link if you already received one.' : '')} success={Boolean(message && !error)} />
+    {!resendUnavailable && <button className="button button--primary auth-submit" type="button" disabled={submitting || (!token && status !== 'authenticated')} onClick={() => void act()}>
       {submitting && <LoaderCircle className="spin" size={17} />}{submitting ? 'Working…' : token ? 'Verify email' : 'Resend verification email'}
-    </button>
+    </button>}
     {status === 'unauthenticated' && !token && <p className="auth-switch"><Link to="/login">Sign in to request another link</Link></p>}
   </Shell>
 }

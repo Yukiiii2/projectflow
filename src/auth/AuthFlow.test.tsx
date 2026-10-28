@@ -16,11 +16,20 @@ const workspace = {
   created_at: '2026-10-20T00:00:00.000Z',
 }
 
-function jsonResponse(status: number, body: unknown) {
+function jsonResponse(status: number, body: unknown, headers: Record<string, string> = {}) {
   return Promise.resolve(new Response(JSON.stringify(body), {
     status,
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...headers },
   }))
+}
+
+const portfolioHeaders = {
+  'X-ProjectFlow-Portfolio-Mode': 'true',
+  'X-ProjectFlow-Demo-Available': 'true',
+  'X-ProjectFlow-Registration-Available': 'false',
+  'X-ProjectFlow-Password-Recovery-Available': 'false',
+  'X-ProjectFlow-Verification-Resend-Available': 'false',
+  'X-ProjectFlow-Email-Invitations-Available': 'false',
 }
 
 function emptyResponse(status: number) {
@@ -42,6 +51,64 @@ afterEach(() => {
 })
 
 describe('frontend authentication integration', () => {
+  it('explains portfolio access on sign-in and removes unavailable account links', async () => {
+    window.history.replaceState({}, '', '/login')
+    fetchMock.mockReturnValueOnce(jsonResponse(401, { error: 'Sign in required' }, portfolioHeaders))
+    render(<App />)
+
+    expect(await screen.findByRole('heading', { name: 'Welcome back' })).toBeInTheDocument()
+    expect(screen.getByText(/portfolio mode/i)).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Forgot password?' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Create an account' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Try Demo' })).toBeEnabled()
+  })
+
+  it('replaces portfolio registration and recovery forms with unavailable guidance', async () => {
+    window.history.replaceState({}, '', '/register')
+    fetchMock.mockReturnValueOnce(jsonResponse(401, { error: 'Sign in required' }, portfolioHeaders))
+    const view = render(<App />)
+
+    expect(await screen.findByRole('heading', { name: 'Registration unavailable' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Create account' })).not.toBeInTheDocument()
+    expect(screen.getByText(/use the private live demo/i)).toBeInTheDocument()
+
+    view.unmount()
+    window.history.replaceState({}, '', '/forgot-password')
+    fetchMock.mockReturnValueOnce(jsonResponse(401, { error: 'Sign in required' }, portfolioHeaders))
+    render(<App />)
+    expect(await screen.findByRole('heading', { name: 'Password recovery unavailable' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Send reset link' })).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Email address')).not.toBeInTheDocument()
+  })
+
+  it('keeps token confirmation but removes verification resend in portfolio mode', async () => {
+    fetchMock.mockReturnValueOnce(jsonResponse(200, { user: { ...authenticatedUser, email_verified: false, email_verification_required: true } }, portfolioHeaders))
+    render(<App />)
+
+    expect(await screen.findByRole('heading', { name: 'Verify your email' })).toBeInTheDocument()
+    expect(screen.getByText(/verification email resend is unavailable/i)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Resend verification email' })).not.toBeInTheDocument()
+  })
+
+  it('keeps team data visible but removes external invitations in portfolio mode', async () => {
+    window.history.replaceState({}, '', '/team')
+    fetchMock.mockImplementation((input) => {
+      const path = new URL(String(input)).pathname
+      if (path === '/api/auth/me') return jsonResponse(200, { user: authenticatedUser }, portfolioHeaders)
+      if (path === '/api/workspaces') return jsonResponse(200, { workspaces: [workspace] })
+      if (path.endsWith('/projects')) return jsonResponse(200, { projects: projectFixtures(workspace.id) })
+      if (path === '/api/tasks') return jsonResponse(200, { tasks: taskFixtures(workspace.id) })
+      if (path.endsWith('/members')) return jsonResponse(200, { members: [testMember] })
+      if (path.endsWith('/invitations')) return jsonResponse(200, { invitations: [] })
+      return jsonResponse(404, { error: 'Unexpected test request' })
+    })
+    render(<App />)
+
+    expect(await screen.findByRole('heading', { name: 'Team' })).toBeInTheDocument()
+    expect(screen.getByText(/email invitations are unavailable in portfolio mode/i)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Invite member' })).not.toBeInTheDocument()
+  })
+
   it('renders the public landing page at the root for an unauthenticated visitor', async () => {
     fetchMock.mockReturnValueOnce(jsonResponse(401, { error: 'Sign in required' }))
     render(<App />)

@@ -77,7 +77,7 @@ function MemberRow({ member, currentUserId, actorRole, busy, onRole, onRemove }:
 }
 
 export function TeamPage() {
-  const { user } = useAuth()
+  const { user, availability } = useAuth()
   const { selectedWorkspace } = useWorkspaces()
   const { members, status: projectStatus, reload } = useProjects()
   const [invitations, setInvitations] = useState<WorkspaceInvitation[]>([])
@@ -118,9 +118,10 @@ export function TeamPage() {
   }
 
   return <div className="management-page team-page">
-    <header className="management-heading"><div><span className="eyebrow">{selectedWorkspace.name}</span><h1 id="page-title">Team</h1><p>Manage workspace access, roles, invitations, and the people available for task assignment.</p></div>{manager && <button type="button" className="button button--primary" onClick={() => setDialogOpen(true)}><Plus size={17} /> Invite member</button>}</header>
+    <header className="management-heading"><div><span className="eyebrow">{selectedWorkspace.name}</span><h1 id="page-title">Team</h1><p>Manage workspace access, roles, invitations, and the people available for task assignment.</p></div>{manager && availability.emailInvitationsAvailable && <button type="button" className="button button--primary" onClick={() => setDialogOpen(true)}><Plus size={17} /> Invite member</button>}</header>
     {notice && <div className="team-notice" role="status">{notice}</div>}
     {!manager && <div className="permission-note" role="note"><ShieldCheck size={17} /> {user.demo ? 'Demo members are available for realistic assignment and collaboration. Invitations and role changes are disabled.' : 'Owners and admins manage workspace invitations and membership.'}</div>}
+    {manager && !availability.emailInvitationsAvailable && <div className="permission-note" role="note"><ShieldCheck size={17} /> Email invitations are unavailable in portfolio mode. Existing members and invitation records remain unchanged.</div>}
     <section className="panel team-section" aria-labelledby="members-heading"><div className="panel-header"><div><h2 id="members-heading">Workspace members</h2><p>{members.length} {members.length === 1 ? 'person' : 'people'} can access this workspace</p></div><span className="team-count"><UsersRound size={16} /> {members.length}</span></div>
       {projectStatus === 'loading' || projectStatus === 'idle' ? <div className="team-loading" aria-busy="true"><LoaderCircle className="spin" size={21} /> Loading members</div> : <div className="team-member-list">{members.map((member) => <MemberRow key={member.id} member={member} currentUserId={user.id} actorRole={user.demo ? 'member' : selectedWorkspace.role} busy={busyId === member.id} onRole={(role) => void changeRole(member, role)} onRemove={() => void remove(member)} />)}</div>}
     </section>

@@ -65,10 +65,11 @@ function expectedNetworkError({ status, path }: { status: number; path: string }
   if (status === 404 && (path === '/api/auth/demo' || /^\/api\/workspaces\/[^/]+\/projects$/.test(path))) return true
   if (status === 403 && (path === '/api/workspaces' || /\/invitations$/.test(path) || /\/members\/[^/]+$/.test(path))) return true
   if (status === 429 && path === '/api/auth/demo') return true
+  if (status === 503 && ['/api/auth/register', '/api/auth/password-reset/request'].includes(path)) return true
   return false
 }
 
-async function startLocalApp(pool: Pool, staticAssetsPath: string, demoModeEnabled: boolean) {
+async function startLocalApp(pool: Pool, staticAssetsPath: string, demoModeEnabled: boolean, portfolioModeEnabled = false) {
   const port = await reservePort()
   const origin = `http://127.0.0.1:${port}`
   const app = createApp({
@@ -77,10 +78,11 @@ async function startLocalApp(pool: Pool, staticAssetsPath: string, demoModeEnabl
     staticAssetsPath,
     config: {
       frontendOrigin: origin,
-      sessionSecret: `final-portfolio-qa-${demoModeEnabled ? 'enabled' : 'disabled'}-session-secret`,
+      sessionSecret: `final-portfolio-qa-${demoModeEnabled ? 'enabled' : 'disabled'}-${portfolioModeEnabled ? 'portfolio' : 'normal'}-session-secret`,
       production: false,
       requireEmailVerification: true,
       demoModeEnabled,
+      portfolioModeEnabled,
     },
   })
   const server = app.listen(port, '127.0.0.1')
@@ -176,6 +178,7 @@ let qaDatabase: IsolatedEmailQaDatabase | undefined
 let browser: Browser | undefined
 let enabledServer: Awaited<ReturnType<typeof startLocalApp>>['server'] | undefined
 let disabledServer: Awaited<ReturnType<typeof startLocalApp>>['server'] | undefined
+let portfolioServer: Awaited<ReturnType<typeof startLocalApp>>['server'] | undefined
 const browserEvidence = evidence()
 const contexts: BrowserContext[] = []
 
@@ -184,8 +187,10 @@ try {
   const { pool } = qaDatabase
   const disabled = await startLocalApp(pool, staticAssetsPath, false)
   const enabled = await startLocalApp(pool, staticAssetsPath, true)
+  const portfolio = await startLocalApp(pool, staticAssetsPath, true, true)
   disabledServer = disabled.server
   enabledServer = enabled.server
+  portfolioServer = portfolio.server
   browser = await chromium.launch({ executablePath: edgePath, headless: true })
 
   const viewportMatrix = [
@@ -249,12 +254,33 @@ let performanceMetrics: { domContentLoadedMs: number; loadMs: number; firstConte
   const disabledPage = await disabledContext.newPage()
   monitor(disabledPage, 'demo-disabled', browserEvidence)
   await disabledPage.goto('/', { waitUntil: 'networkidle' })
-  await disabledPage.getByRole('button', { name: 'Try Live Demo' }).first().click()
-  await disabledPage.getByRole('alert').getByText('The live demo is temporarily unavailable.').waitFor()
+  const disabledDemoButton = disabledPage.getByRole('button', { name: 'Demo unavailable' }).first()
+  await disabledDemoButton.waitFor()
+  assert(await disabledDemoButton.isDisabled(), 'Disabled demo action remained interactive')
   assert(await disabledPage.getByRole('heading', { name: 'Bring clarity to every project.' }).isVisible(), 'Disabled demo left the landing page')
   await disabledPage.screenshot({ path: join(artifactDirectory, '07-demo-disabled.png'), fullPage: true })
   await disabledContext.close()
   contexts.splice(contexts.indexOf(disabledContext), 1)
+
+  const portfolioContext = await browser.newContext({ viewport: { width: 1440, height: 1000 }, baseURL: portfolio.origin, colorScheme: 'dark' })
+  contexts.push(portfolioContext)
+  const portfolioPage = await portfolioContext.newPage()
+  monitor(portfolioPage, 'portfolio-policy', browserEvidence)
+  await portfolioPage.goto('/', { waitUntil: 'networkidle' })
+  await portfolioPage.getByText(/Portfolio mode: new accounts and email-based recovery are unavailable/i).waitFor()
+  assert(await portfolioPage.getByRole('link', { name: 'Create an account' }).count() === 0, 'Portfolio landing exposed account creation')
+  assert(await portfolioPage.getByRole('button', { name: 'Try Live Demo' }).first().isEnabled(), 'Portfolio landing disabled the live demo')
+  await portfolioPage.goto('/register', { waitUntil: 'networkidle' })
+  await portfolioPage.getByRole('heading', { name: 'Registration unavailable' }).waitFor()
+  assert(await portfolioPage.getByRole('button', { name: 'Create account' }).count() === 0, 'Portfolio registration form remained available')
+  await portfolioPage.goto('/forgot-password', { waitUntil: 'networkidle' })
+  await portfolioPage.getByRole('heading', { name: 'Password recovery unavailable' }).waitFor()
+  assert(await portfolioPage.getByRole('button', { name: 'Send reset link' }).count() === 0, 'Portfolio recovery form remained available')
+  assert(await apiStatus(portfolioPage, '/api/auth/register', { method: 'POST', body: { name: 'Blocked User', email: 'blocked@example.test', password: 'blocked correct horse battery staple' } }) === 503, 'Portfolio registration API was not blocked')
+  assert(await apiStatus(portfolioPage, '/api/auth/password-reset/request', { method: 'POST', body: { email: 'blocked@example.test' } }) === 503, 'Portfolio recovery API was not blocked')
+  await portfolioPage.screenshot({ path: join(artifactDirectory, '08-portfolio-policy.png'), fullPage: true })
+  await portfolioContext.close()
+  contexts.splice(contexts.indexOf(portfolioContext), 1)
 
   const journeyContext = await browser.newContext({ viewport: { width: 1440, height: 1000 }, baseURL: enabled.origin, colorScheme: 'dark' })
   contexts.push(journeyContext)
@@ -359,17 +385,26 @@ let performanceMetrics: { domContentLoadedMs: number; loadMs: number; firstConte
   const secondPage = await secondContext.newPage()
   monitor(secondPage, 'second-demo', browserEvidence)
   await startDemoFromLanding(secondPage)
+  const secondSessionUserId = await secondPage.evaluate(async () => {
+    const response = await fetch('/api/auth/me', { credentials: 'include' })
+    const body = await response.json() as { user?: { id?: string } }
+    return body.user?.id
+  })
+  assert(secondSessionUserId, 'Second browser session did not expose its authenticated user identity')
+  const secondIdentity = (await pool.query<{ demo_instance_id: string; workspace_id: string }>(`SELECT u.demo_instance_id,w.id AS workspace_id FROM users u
+    JOIN workspaces w ON w.demo_instance_id=u.demo_instance_id WHERE u.id=$1`, [secondSessionUserId])).rows[0]
+  assert(secondIdentity, 'Second browser session did not map to an isolated demo workspace')
   const identities = await pool.query<{ demo_instance_id: string; workspace_id: string }>(`SELECT u.demo_instance_id,w.id AS workspace_id FROM users u
     JOIN workspaces w ON w.demo_instance_id=u.demo_instance_id WHERE u.name='Demo Visitor' ORDER BY u.created_at`)
   assert(identities.rows.length === 2 && identities.rows[0]!.workspace_id !== identities.rows[1]!.workspace_id, 'Two visitors did not receive isolated workspaces')
-  blockedStatuses.otherDemo = await apiStatus(journeyPage, `/api/workspaces/${identities.rows[1]!.workspace_id}/projects`)
+  blockedStatuses.otherDemo = await apiStatus(journeyPage, `/api/workspaces/${secondIdentity.workspace_id}/projects`)
   assert(blockedStatuses.otherDemo === 404, 'First visitor could read the second visitor workspace')
 
-  await pool.query('UPDATE demo_instances SET expires_at=now() WHERE id=$1', [identities.rows[1]!.demo_instance_id])
+  await pool.query('UPDATE demo_instances SET expires_at=now() WHERE id=$1', [secondIdentity.demo_instance_id])
   assert(await apiStatus(secondPage, '/api/workspaces') === 401, 'Expired demo session still reached protected data')
   await secondPage.reload({ waitUntil: 'networkidle' })
   await secondPage.getByRole('heading', { name: 'Bring clarity to every project.' }).waitFor()
-  assert((await pool.query('SELECT id FROM demo_instances WHERE id=$1', [identities.rows[1]!.demo_instance_id])).rowCount === 0, 'Expired demo instance was not removed')
+  assert((await pool.query('SELECT id FROM demo_instances WHERE id=$1', [secondIdentity.demo_instance_id])).rowCount === 0, 'Expired demo instance was not removed')
   await secondContext.close()
   contexts.splice(contexts.indexOf(secondContext), 1)
 
@@ -406,6 +441,7 @@ let performanceMetrics: { domContentLoadedMs: number; loadMs: number; firstConte
 
   const screenshotNames = viewportMatrix.map((viewport) => `${viewport.label}.png`).concat([
     '07-demo-disabled.png',
+    '08-portfolio-policy.png',
     '08-demo-dashboard.png',
     '09-projects.png',
     '10-task-comment-edited.png',
@@ -423,6 +459,7 @@ let performanceMetrics: { domContentLoadedMs: number; loadMs: number; firstConte
       'navigation anchors and sign-in return',
       'reduced motion and serious/critical accessibility',
       'disabled demo state',
+      'portfolio registration and recovery policy',
       'landing-to-demo visitor journey',
       'task create/edit/assignment/status',
       'comment add/edit/delete and activity history',
@@ -441,6 +478,7 @@ let performanceMetrics: { domContentLoadedMs: number; loadMs: number; firstConte
   if (browser) await browser.close().catch(() => undefined)
   if (enabledServer) await new Promise<void>((resolve) => enabledServer!.close(() => resolve()))
   if (disabledServer) await new Promise<void>((resolve) => disabledServer!.close(() => resolve()))
+  if (portfolioServer) await new Promise<void>((resolve) => portfolioServer!.close(() => resolve()))
   const schema = qaDatabase?.schema
   if (qaDatabase) await qaDatabase.dispose()
   if (schema) {

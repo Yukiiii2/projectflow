@@ -19,11 +19,20 @@ const demoUser = {
   demo_expires_at: '2026-10-28T05:30:00.000Z',
 }
 
-function jsonResponse(status: number, body: unknown) {
+function jsonResponse(status: number, body: unknown, headers: Record<string, string> = {}) {
   return Promise.resolve(new Response(JSON.stringify(body), {
     status,
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...headers },
   }))
+}
+
+const portfolioHeaders = {
+  'X-ProjectFlow-Portfolio-Mode': 'true',
+  'X-ProjectFlow-Demo-Available': 'true',
+  'X-ProjectFlow-Registration-Available': 'false',
+  'X-ProjectFlow-Password-Recovery-Available': 'false',
+  'X-ProjectFlow-Verification-Resend-Available': 'false',
+  'X-ProjectFlow-Email-Invitations-Available': 'false',
 }
 
 beforeEach(() => {
@@ -39,6 +48,17 @@ afterEach(() => {
 })
 
 describe('public ProjectFlow landing page', () => {
+  it('presents the live demo as the portfolio access path without account claims', async () => {
+    fetchMock.mockReturnValueOnce(jsonResponse(401, { error: 'Sign in required' }, portfolioHeaders))
+    render(<App />)
+
+    expect(await screen.findByRole('heading', { name: 'Bring clarity to every project.' })).toBeInTheDocument()
+    expect(screen.getByText(/portfolio mode/i)).toBeInTheDocument()
+    expect(screen.getByText(/new accounts and email-based recovery are unavailable/i)).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Create an account' })).not.toBeInTheDocument()
+    for (const button of screen.getAllByRole('button', { name: 'Try Live Demo' })) expect(button).toBeEnabled()
+  })
+
   it('presents accurate product sections and functional navigation', async () => {
     fetchMock.mockReturnValueOnce(jsonResponse(401, { error: 'Sign in required' }))
     render(<App />)

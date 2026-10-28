@@ -6,7 +6,7 @@ import { createApp } from './app.js';
 import { loadServerConfig } from './config.js';
 import { createDatabasePool } from './db.js';
 import { createEmailOutbox, startEmailOutboxWorker } from './email-outbox.js';
-import { invitationDeliveryFromEnv } from './invitation-delivery.js';
+import { disabledInvitationDelivery, invitationDeliveryFromEnv } from './invitation-delivery.js';
 import { createLogger } from './logger.js';
 
 const config = loadServerConfig(process.env);
@@ -21,8 +21,8 @@ try {
 }
 
 const PgStore = connectPgSimple(session);
-const transportDelivery = invitationDeliveryFromEnv(config.production);
-const emailOutbox = config.production ? createEmailOutbox(config.emailOutboxKey!) : undefined;
+const transportDelivery = config.portfolioModeEnabled ? disabledInvitationDelivery() : invitationDeliveryFromEnv(config.production);
+const emailOutbox = config.production && !config.portfolioModeEnabled ? createEmailOutbox(config.emailOutboxKey!) : undefined;
 const app = createApp({
   db,
   sessionStore: new PgStore({ pool: db, createTableIfMissing: false }),
@@ -40,13 +40,14 @@ const app = createApp({
     trustProxyHops: config.trustProxyHops,
     requireEmailVerification: config.requireEmailVerification,
     demoModeEnabled: config.demoModeEnabled,
+    portfolioModeEnabled: config.portfolioModeEnabled,
   },
 });
 
 const server = app.listen(config.port, () => {
   logger.info('server_started', { port: config.port, production: config.production });
 });
-const emailWorker = config.production ? startEmailOutboxWorker(db, transportDelivery, logger, config.emailOutboxKey!) : undefined;
+const emailWorker = config.production && !config.portfolioModeEnabled ? startEmailOutboxWorker(db, transportDelivery, logger, config.emailOutboxKey!) : undefined;
 
 function shutdown(signal: string) {
   logger.info('server_shutdown', { signal });
