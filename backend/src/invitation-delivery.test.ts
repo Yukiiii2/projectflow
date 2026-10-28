@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { invitationDeliveryFromEnv, previewInvitationDelivery } from './invitation-delivery.js'
+import { deliveryErrorLogFields, invitationDeliveryFromEnv, previewInvitationDelivery } from './invitation-delivery.js'
 
 const { createTransport } = vi.hoisted(() => ({
   createTransport: vi.fn(() => ({ sendMail: vi.fn() })),
@@ -124,6 +124,8 @@ describe('invitation delivery configuration', () => {
   it('turns a Resend API rejection into a secret-safe delivery failure', async () => {
     configureResendApi()
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      name: 'rate_limit_exceeded',
+      statusCode: 429,
       message: 'provider detail containing test-resend-api-key',
     }), { status: 429 })))
 
@@ -135,9 +137,57 @@ describe('invitation delivery configuration', () => {
       verifyUrl: 'https://projectflow.example/verify-email?token=secret',
     }).catch((error: unknown) => error)
 
-    expect(failure).toMatchObject({ name: 'ResendApiError', message: 'Resend API request failed with status 429' })
+    expect(failure).toMatchObject({
+      name: 'ResendApiError',
+      message: 'Resend API request failed with status 429',
+      status: 429,
+      providerCode: 'rate_limit_exceeded',
+      providerReason: 'rate_limited',
+    })
+    expect(deliveryErrorLogFields(failure)).toEqual({
+      errorName: 'ResendApiError',
+      providerStatus: 429,
+      providerCode: 'rate_limit_exceeded',
+      providerReason: 'rate_limited',
+    })
     expect(String(failure)).not.toContain('test-resend-api-key')
     expect(String(failure)).not.toContain('provider detail')
+  })
+
+  it.each([
+    [
+      'the Resend testing sender is restricted to the account owner',
+      'You can only send testing emails to your own email address. To send emails to other recipients, please verify a domain.',
+      'testing_recipient_restricted',
+    ],
+    [
+      'the configured sender domain has not been verified',
+      'The example.test domain is not verified. Please add and verify your domain before sending.',
+      'sender_domain_unverified',
+    ],
+  ])('classifies a 403 when %s without retaining provider text', async (_label, message, providerReason) => {
+    configureResendApi()
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      name: 'validation_error',
+      statusCode: 403,
+      message,
+    }), { status: 403 })))
+
+    const failure = await invitationDeliveryFromEnv(true).sendVerification({
+      recipient: 'maya@example.com',
+      name: 'Maya',
+      expiresAt: '2026-10-27T00:00:00.000Z',
+      verifyUrl: 'https://projectflow.example/verify-email?token=secret',
+    }).catch((error: unknown) => error)
+
+    expect(deliveryErrorLogFields(failure)).toEqual({
+      errorName: 'ResendApiError',
+      providerStatus: 403,
+      providerCode: 'validation_error',
+      providerReason,
+    })
+    expect(JSON.stringify(failure)).not.toContain('example.test')
+    expect(JSON.stringify(failure)).not.toContain('maya@example.com')
   })
 
   it('turns a Resend network failure into a provider-neutral delivery failure', async () => {

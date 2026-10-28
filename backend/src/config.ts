@@ -17,6 +17,11 @@ function isPlaceholder(value: string | undefined) {
   return !value || /^(change_me|replace_|placeholder)/i.test(value)
 }
 
+function usesResendTestingDomain(value: string) {
+  const mailbox = value.trim().match(/<?[^<>\s@]+@([^<>\s]+)>?$/)
+  return mailbox?.[1]?.toLowerCase() === 'resend.dev'
+}
+
 function integer(value: string | undefined, fallback: number, name: string, minimum: number, maximum: number) {
   const parsed = Number(value ?? fallback)
   if (!Number.isInteger(parsed) || parsed < minimum || parsed > maximum) {
@@ -69,6 +74,9 @@ export function loadServerConfig(environment: NodeJS.ProcessEnv): ServerConfig {
     if (environment.INVITATION_DELIVERY === 'resend') {
       if (!environment.RESEND_API_KEY || !environment.INVITATION_FROM) throw new Error('Production Resend API configuration is incomplete')
       if (isPlaceholder(environment.RESEND_API_KEY)) throw new Error('Production RESEND_API_KEY must not use a placeholder')
+      if (usesResendTestingDomain(environment.INVITATION_FROM)) {
+        throw new Error('Production INVITATION_FROM must use a verified custom domain; resend.dev is testing-only')
+      }
     } else {
       const required = ['SMTP_HOST', 'SMTP_USER', 'SMTP_PASSWORD', 'INVITATION_FROM'] as const
       if (required.some((name) => !environment[name])) throw new Error('Production SMTP configuration is incomplete')

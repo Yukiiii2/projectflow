@@ -41,6 +41,7 @@ describe('production readiness configuration', () => {
     ['mis-cased email delivery mode', { INVITATION_DELIVERY: 'Resend' }, 'Production INVITATION_DELIVERY must be set to resend or smtp'],
     ['preview email', { INVITATION_DELIVERY: 'preview' }, 'Production INVITATION_DELIVERY must be set to resend or smtp'],
     ['missing Resend sender', { INVITATION_FROM: undefined }, 'Production Resend API configuration is incomplete'],
+    ['Resend testing sender', { INVITATION_FROM: 'ProjectFlow <onboarding@resend.dev>' }, 'verified custom domain'],
     ['disabled verification', { REQUIRE_EMAIL_VERIFICATION: 'false' }, 'email verification'],
     ['invalid proxy hops', { TRUST_PROXY_HOPS: '0' }, 'TRUST_PROXY_HOPS'],
     ['placeholder Resend secret', { RESEND_API_KEY: 'REPLACE_WITH_RESEND_API_KEY' }, 'placeholder'],

@@ -58,8 +58,84 @@ function smtpTransportSecurity(port: number, production: boolean) {
   return { secure: false, requireTLS: false }
 }
 
-class ResendApiError extends Error {
+interface ResendApiErrorOptions extends ErrorOptions {
+  status?: number
+  providerCode?: string
+  providerReason?: string
+}
+
+export class ResendApiError extends Error {
   override name = 'ResendApiError'
+
+  readonly status?: number
+  readonly providerCode?: string
+  readonly providerReason?: string
+
+  constructor(message: string, options: ResendApiErrorOptions = {}) {
+    super(message, options)
+    this.status = options.status
+    this.providerCode = options.providerCode
+    this.providerReason = options.providerReason
+  }
+}
+
+function providerCode(value: unknown) {
+  return typeof value === 'string' && /^[a-z0-9_]{1,64}$/i.test(value) ? value : undefined
+}
+
+function providerReason(status: number, message: unknown) {
+  const detail = typeof message === 'string' ? message : ''
+  if (status === 429) return 'rate_limited'
+  if (status === 401) return 'api_key_invalid'
+  if (status !== 403) return undefined
+  if (/only send testing emails to your own email address/i.test(detail)
+    || (/resend\.dev/i.test(detail) && /(testing|own email)/i.test(detail))) {
+    return 'testing_recipient_restricted'
+  }
+  if (/(domain|sender)/i.test(detail) && /(not verified|verify (?:a |your )?domain)/i.test(detail)) {
+    return 'sender_domain_unverified'
+  }
+  if (/api key/i.test(detail) && /(permission|restricted|access|invalid)/i.test(detail)) {
+    return 'api_key_permission_denied'
+  }
+  return 'forbidden'
+}
+
+async function resendRejection(response: Response) {
+  let body: unknown
+  try {
+    body = await response.json()
+  } catch {
+    body = undefined
+  }
+  const error = body && typeof body === 'object' ? body as { name?: unknown; message?: unknown } : undefined
+  return new ResendApiError(`Resend API request failed with status ${response.status}`, {
+    status: response.status,
+    providerCode: providerCode(error?.name),
+    providerReason: providerReason(response.status, error?.message),
+  })
+}
+
+export function deliveryErrorLogFields(error: unknown) {
+  const fields: {
+    errorName: string
+    providerStatus?: number
+    providerCode?: string
+    providerReason?: string
+  } = { errorName: error instanceof Error ? error.name : 'UnknownError' }
+  if (error instanceof ResendApiError) {
+    if (error.status !== undefined) fields.providerStatus = error.status
+    if (error.providerCode !== undefined) fields.providerCode = error.providerCode
+    if (error.providerReason !== undefined) fields.providerReason = error.providerReason
+  }
+  return fields
+}
+
+export function deliveryErrorSummary(error: unknown) {
+  const fields = deliveryErrorLogFields(error)
+  return [fields.errorName, fields.providerStatus, fields.providerCode, fields.providerReason]
+    .filter((value) => value !== undefined)
+    .join(':')
 }
 
 function resendApiDelivery(apiKey: string, from: string): InvitationDelivery {
@@ -82,7 +158,7 @@ function resendApiDelivery(apiKey: string, from: string): InvitationDelivery {
     } catch (error) {
       throw new ResendApiError('Resend API request failed', { cause: error })
     }
-    if (!response.ok) throw new ResendApiError(`Resend API request failed with status ${response.status}`)
+    if (!response.ok) throw await resendRejection(response)
 
     let result: unknown
     try {

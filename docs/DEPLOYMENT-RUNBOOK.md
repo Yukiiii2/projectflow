@@ -27,7 +27,7 @@ This runbook prepares the approved single-service architecture. It does not auth
 2. Copy the **pooled** connection string for Render's runtime `DATABASE_URL` and confirm it ends with `sslmode=require` or a stronger verification mode. Store the direct, non-pooler TLS URL separately for the operator-only `MIGRATION_DATABASE_URL`; ProjectFlow migrations use a session advisory lock that is incompatible with transaction pooling.
 3. Create a Neon snapshot or recovery branch, restore it to a separate branch, and complete the database runbook before accepting non-recreatable data.
 4. Create a Resend account, approve a sending domain, and publish the exact SPF/DKIM records Resend provides. Create a sending-only key restricted to the production domain where available; Resend supports sending-scoped API keys ([Resend API key permissions](https://resend.com/changelog/new-api-key-permissions)).
-5. Confirm the sender identity matches `INVITATION_FROM`, then test the Resend HTTPS email API. Each outbox row supplies a stable idempotency key, which Resend retains for 24 hours to prevent duplicate sends during retries ([Resend idempotency keys](https://resend.com/changelog/idempotency-keys)).
+5. Confirm the sender identity matches `INVITATION_FROM` and uses a verified custom domain, then test the Resend HTTPS email API. Do not use Resend's `@resend.dev` testing sender for public registration; it is restricted to provider-approved test recipients and ProjectFlow rejects it in production. Each outbox row supplies a stable idempotency key, which Resend retains for 24 hours to prevent duplicate sends during retries ([Resend idempotency keys](https://resend.com/changelog/idempotency-keys)).
 6. Create a Render Blueprint from this repository. Review the proposed Free service, Node.js 24, build/start commands, `/api/health`, environment values, region, and plan before applying it. Confirm `plan: free`, no disk/database/add-on, and no automatic upgrade or paid workspace feature. Accept the documented cold-start, quota, outbound-traffic, no-shell, and ephemeral-filesystem limits ([Render Free limitations](https://render.com/docs/free)). If the account has a payment method, configure available spend controls and alerts before launch; otherwise stop instead of accepting an overage or upgrade prompt.
 7. Confirm `autoDeployTrigger: checksPass` so Render deploys `main` only after GitHub checks succeed. Do not bypass a failed check or manually deploy an unverified commit ([Render deploys](https://render.com/docs/deploys)).
 
@@ -60,6 +60,8 @@ Render supplies `PORT`; do not hard-code or override it. Do not configure `VITE_
 8. Complete registration, email verification, session refresh, workspace, project, task, Kanban, invitation, comment, password reset, logout, and sign-in checks using synthetic records.
 9. Verify direct cross-workspace requests return nondisclosing 404 responses.
 10. Verify invitation, verification, and reset delivery through the Resend HTTPS API without copying tokens into logs.
+
+Before a verified domain is available, application behavior may be exercised locally with `npm --prefix backend run verify:email:browser` after `npm run build:all`. This harness is not a substitute for hosted delivery: it refuses remote PostgreSQL, uses an isolated local schema, exposes no inbox route, and is excluded from production artifacts.
 11. Confirm `email_outbox` drains after successful deliveries and retries provider failures without logging payloads.
 12. Remove only the isolated test records and confirm no temporary accounts remain.
 13. Configure an external uptime check for `/api/health` and an error-monitoring project.
@@ -93,10 +95,12 @@ Before upgrading to `pg` 9 or `pg-connection-string` 3, review their announced l
 | `/api/health` unavailable | External HTTPS probe and Render | Two consecutive failures; tune after observing hosted behavior | Page the application owner, inspect deploy/database state, pause releases |
 | Deploy/build/pre-deploy failure | Render | Any failure | Keep prior release active, review logs, do not bypass migration checks |
 | Repeated 5xx or `request_failed` | Structured application logs | Alert on a sustained cluster, not a single expected test error | Correlate by request ID; inspect sanitized error class and route |
-| `email_outbox_delivery_abandoned` | Structured application logs | Any event | Check Resend/provider status and affected message kind; never log the recipient or bearer URL |
+| `email_outbox_delivery_abandoned` | Structured application logs | Any event | Check the secret-safe provider status, code, and reason plus the affected message kind; use Resend **Logs** (not only Sending) for the provider's full response; never copy the recipient or bearer URL into application logs |
 | Abnormal 401/403/429 volume | Structured application logs | Baseline-dependent | Check abuse, proxy IP attribution, and limiter behavior |
 | Connection/storage/compute pressure | Neon | Provider warning threshold | Reduce load or raise capacity; verify pool and long-running queries |
 | Bounce/complaint/suppression spike | Resend | Any provider warning or material increase | Pause affected mail, inspect sender/domain reputation and recipient policy |
+
+Never decrypt, manually replay, or copy a failed outbox payload for troubleshooting. Correct the provider configuration first, then have the signed-in unverified user request a new verification message through the application so token replacement, expiry, hashing, encryption, and audit boundaries remain intact.
 
 Assign one named owner and one fallback contact for application, database, and email alerts before launch. Confirm test alerts reach both contacts, include the environment and runbook link, exclude secrets/personal data, and have a documented acknowledge/escalate/resolve path. The application already emits newline-delimited JSON to standard output; hosted verification must confirm Render preserves `timestamp`, `level`, `event`, request ID, status, duration, and redacted path fields.
 

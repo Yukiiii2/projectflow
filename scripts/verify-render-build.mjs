@@ -1,4 +1,4 @@
-import { access, readFile } from 'node:fs/promises'
+import { access, readFile, readdir } from 'node:fs/promises'
 import path from 'node:path'
 
 const root = process.cwd()
@@ -8,6 +8,18 @@ const requiredArtifacts = [
   path.join(root, 'dist', 'index.html'),
   path.join(root, 'backend', 'dist', 'server.js'),
 ]
+const forbiddenBackendMarkers = ['PROJECTFLOW_TEST_EMAIL_CAPTURE']
+
+async function javascriptFiles(directory) {
+  const entries = await readdir(directory, { withFileTypes: true })
+  const results = []
+  for (const entry of entries) {
+    const target = path.join(directory, entry.name)
+    if (entry.isDirectory()) results.push(...await javascriptFiles(target))
+    else if (entry.name.endsWith('.js')) results.push(target)
+  }
+  return results
+}
 
 if (rootPackage.scripts?.start !== 'npm --prefix backend start') {
   throw new Error('Root start script must delegate to the backend package')
@@ -26,6 +38,16 @@ for (const artifact of requiredArtifacts) {
     await access(artifact)
   } catch {
     throw new Error(`Required Render build artifact is missing: ${path.relative(root, artifact)}`)
+  }
+}
+
+const backendDist = path.join(root, 'backend', 'dist')
+for (const file of await javascriptFiles(backendDist)) {
+  const contents = await readFile(file, 'utf8')
+  for (const marker of forbiddenBackendMarkers) {
+    if (contents.includes(marker)) {
+      throw new Error(`Production backend contains test-only email capture code: ${path.relative(root, file)}`)
+    }
   }
 }
 

@@ -7,6 +7,7 @@ import type {
   PasswordResetMessage,
   VerificationMessage,
 } from './invitation-delivery.js'
+import { deliveryErrorLogFields, deliveryErrorSummary } from './invitation-delivery.js'
 import type { Logger } from './logger.js'
 
 export type OutboxKind = 'invitation' | 'email_verification' | 'password_reset'
@@ -101,17 +102,17 @@ export async function processNextOutboxMessage(db: Pool, delivery: InvitationDel
     await db.query('DELETE FROM email_outbox WHERE id=$1', [row.id])
     logger.info('email_outbox_delivered', { messageId: row.id, kind: row.kind })
   } catch (error) {
-    const errorName = error instanceof Error ? error.name : 'UnknownError'
+    const errorFields = deliveryErrorLogFields(error)
     if (row.attempts >= 5) {
       await db.query('DELETE FROM email_outbox WHERE id=$1', [row.id])
-      logger.error('email_outbox_delivery_abandoned', { messageId: row.id, kind: row.kind, errorName, attempts: row.attempts })
+      logger.error('email_outbox_delivery_abandoned', { messageId: row.id, kind: row.kind, ...errorFields, attempts: row.attempts })
       return true
     }
     const retryMinutes = Math.min(60, 2 ** Math.min(row.attempts, 6))
     await db.query(`UPDATE email_outbox
       SET locked_at=NULL, available_at=now()+($2 * interval '1 minute'), last_error=$3
-      WHERE id=$1`, [row.id, retryMinutes, errorName])
-    logger.warn('email_outbox_delivery_failed', { messageId: row.id, kind: row.kind, errorName, attempts: row.attempts, retryMinutes })
+      WHERE id=$1`, [row.id, retryMinutes, deliveryErrorSummary(error)])
+    logger.warn('email_outbox_delivery_failed', { messageId: row.id, kind: row.kind, ...errorFields, attempts: row.attempts, retryMinutes })
   }
   return true
 }

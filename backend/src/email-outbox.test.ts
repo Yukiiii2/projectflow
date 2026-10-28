@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { processNextOutboxMessage, queuedInvitationDelivery } from './email-outbox.js'
+import { ResendApiError } from './invitation-delivery.js'
 
 describe('production email outbox', () => {
   const key = Buffer.alloc(32, 7)
@@ -84,5 +85,47 @@ describe('production email outbox', () => {
     })
     expect(logger.warn).not.toHaveBeenCalled()
     expect(JSON.stringify(logger.error.mock.calls)).not.toContain('secret')
+  })
+
+  it('records only safe Resend rejection metadata for a retry', async () => {
+    const message = { recipient: 'maya@example.com', name: 'Maya', expiresAt: '2026-10-22T12:00:00.000Z', resetUrl: 'https://projectflow.example/reset-password?token=secret' }
+    const enqueueQuery = vi.fn().mockResolvedValue({ rows: [] })
+    await queuedInvitationDelivery({ query: enqueueQuery } as never, key).sendPasswordReset(message)
+    const encrypted = JSON.parse(String(enqueueQuery.mock.calls[0]?.[1]?.[1]))
+    const query = vi.fn()
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ id: 'job-id', kind: 'password_reset', payload: encrypted, attempts: 1 }] })
+      .mockResolvedValueOnce({ rows: [] })
+    const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }
+    const rejection = new ResendApiError('Resend API request failed with status 403', {
+      status: 403,
+      providerCode: 'validation_error',
+      providerReason: 'testing_recipient_restricted',
+    })
+
+    await processNextOutboxMessage(
+      { query } as never,
+      { mode: 'resend', send: vi.fn(), sendVerification: vi.fn(), sendPasswordReset: vi.fn().mockRejectedValue(rejection) } as never,
+      logger,
+      key,
+    )
+
+    expect(query.mock.calls[2]?.[1]).toEqual([
+      'job-id',
+      2,
+      'ResendApiError:403:validation_error:testing_recipient_restricted',
+    ])
+    expect(logger.warn).toHaveBeenCalledWith('email_outbox_delivery_failed', {
+      messageId: 'job-id',
+      kind: 'password_reset',
+      errorName: 'ResendApiError',
+      providerStatus: 403,
+      providerCode: 'validation_error',
+      providerReason: 'testing_recipient_restricted',
+      attempts: 1,
+      retryMinutes: 2,
+    })
+    expect(JSON.stringify(logger.warn.mock.calls)).not.toContain('maya@example.com')
+    expect(JSON.stringify(logger.warn.mock.calls)).not.toContain('secret')
   })
 })
