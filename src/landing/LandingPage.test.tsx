@@ -132,7 +132,7 @@ describe('public ProjectFlow landing page', () => {
 
     await user.keyboard('{Escape}')
     await waitFor(() => expect(screen.queryByRole('navigation', { name: 'Mobile' })).not.toBeInTheDocument())
-    expect(trigger).toHaveFocus()
+    await waitFor(() => expect(trigger).toHaveFocus())
   })
 
   it('reserves preview space and prioritizes only the hero product image', async () => {
