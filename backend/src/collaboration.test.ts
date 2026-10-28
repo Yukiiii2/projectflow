@@ -18,7 +18,8 @@ async function context(emailOutbox?: Parameters<typeof createApp>[0]['emailOutbo
   const first = await readFile(fileURLToPath(new URL('../sql/001_init.sql', import.meta.url)), 'utf8')
   const collaboration = await readFile(fileURLToPath(new URL('../sql/002_collaboration.sql', import.meta.url)), 'utf8')
   const accountSecurity = await readFile(fileURLToPath(new URL('../sql/003_account_security.sql', import.meta.url)), 'utf8')
-  memory.public.none(`${first.replace('CREATE EXTENSION IF NOT EXISTS pgcrypto;', '')}\n${collaboration}\n${accountSecurity}`)
+  const demo = await readFile(fileURLToPath(new URL('../sql/006_portfolio_demo.sql', import.meta.url)), 'utf8')
+  memory.public.none(`${first.replace('CREATE EXTENSION IF NOT EXISTS pgcrypto;', '')}\n${collaboration}\n${accountSecurity}\n${demo}`)
   const adapter = memory.adapters.createPg()
   const pool = new adapter.Pool() as unknown as Pool
   pools.push(pool)

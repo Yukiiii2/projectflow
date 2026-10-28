@@ -86,7 +86,7 @@ export function TeamPage() {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [busyId, setBusyId] = useState('')
   const [notice, setNotice] = useState('')
-  const manager = selectedWorkspace?.role === 'owner' || selectedWorkspace?.role === 'admin'
+  const manager = !user?.demo && (selectedWorkspace?.role === 'owner' || selectedWorkspace?.role === 'admin')
 
   useEffect(() => {
     if (!selectedWorkspace || !manager) { setInvitations([]); setInviteStatus('ready'); return }
@@ -120,9 +120,9 @@ export function TeamPage() {
   return <div className="management-page team-page">
     <header className="management-heading"><div><span className="eyebrow">{selectedWorkspace.name}</span><h1 id="page-title">Team</h1><p>Manage workspace access, roles, invitations, and the people available for task assignment.</p></div>{manager && <button type="button" className="button button--primary" onClick={() => setDialogOpen(true)}><Plus size={17} /> Invite member</button>}</header>
     {notice && <div className="team-notice" role="status">{notice}</div>}
-    {!manager && <div className="permission-note" role="note"><ShieldCheck size={17} /> Owners and admins manage workspace invitations and membership.</div>}
+    {!manager && <div className="permission-note" role="note"><ShieldCheck size={17} /> {user.demo ? 'Demo members are available for realistic assignment and collaboration. Invitations and role changes are disabled.' : 'Owners and admins manage workspace invitations and membership.'}</div>}
     <section className="panel team-section" aria-labelledby="members-heading"><div className="panel-header"><div><h2 id="members-heading">Workspace members</h2><p>{members.length} {members.length === 1 ? 'person' : 'people'} can access this workspace</p></div><span className="team-count"><UsersRound size={16} /> {members.length}</span></div>
-      {projectStatus === 'loading' || projectStatus === 'idle' ? <div className="team-loading" aria-busy="true"><LoaderCircle className="spin" size={21} /> Loading members</div> : <div className="team-member-list">{members.map((member) => <MemberRow key={member.id} member={member} currentUserId={user.id} actorRole={selectedWorkspace.role} busy={busyId === member.id} onRole={(role) => void changeRole(member, role)} onRemove={() => void remove(member)} />)}</div>}
+      {projectStatus === 'loading' || projectStatus === 'idle' ? <div className="team-loading" aria-busy="true"><LoaderCircle className="spin" size={21} /> Loading members</div> : <div className="team-member-list">{members.map((member) => <MemberRow key={member.id} member={member} currentUserId={user.id} actorRole={user.demo ? 'member' : selectedWorkspace.role} busy={busyId === member.id} onRole={(role) => void changeRole(member, role)} onRemove={() => void remove(member)} />)}</div>}
     </section>
     {manager && <section className="panel team-section" aria-labelledby="invitations-heading"><div className="panel-header"><div><h2 id="invitations-heading">Invitations</h2><p>Track delivery and acceptance without exposing invitation tokens.</p></div><Mail size={19} /></div>
       {inviteStatus === 'loading' && <div className="team-loading" aria-busy="true"><LoaderCircle className="spin" size={21} /> Loading invitations</div>}

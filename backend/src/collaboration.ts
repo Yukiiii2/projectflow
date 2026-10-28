@@ -4,6 +4,7 @@ import type { Pool } from 'pg'
 import { z } from 'zod'
 import type { InvitationDelivery } from './invitation-delivery.js'
 import type { EmailOutbox } from './email-outbox.js'
+import { DemoExpiredError, DemoQuotaError, withDemoQuota } from './demo.js'
 
 type AsyncHandler = (req: Request, res: Response) => Promise<unknown>
 type Membership = (userId: string, workspaceId: string) => Promise<string | undefined>
@@ -43,6 +44,21 @@ export async function recordActivity(db: Pool, input: {
   action: string
   metadata?: Record<string, unknown>
 }) {
+  const workspace = await db.query<{ demo_instance_id: string | null }>('SELECT demo_instance_id FROM workspaces WHERE id=$1', [input.workspaceId])
+  const demoInstanceId = workspace.rows[0]?.demo_instance_id
+  if (demoInstanceId) {
+    try {
+      await withDemoQuota(db, demoInstanceId, 'activity', async (client) => {
+        await client.query(
+          'INSERT INTO activity_events(workspace_id,project_id,task_id,actor_id,action,metadata) VALUES ($1,$2,$3,$4,$5,$6::jsonb)',
+          [input.workspaceId, input.projectId ?? null, input.taskId ?? null, input.actorId, input.action, JSON.stringify(input.metadata ?? {})],
+        )
+      })
+    } catch (error) {
+      if (!(error instanceof DemoQuotaError) && !(error instanceof DemoExpiredError)) throw error
+    }
+    return
+  }
   await db.query(
     'INSERT INTO activity_events(workspace_id,project_id,task_id,actor_id,action,metadata) VALUES ($1,$2,$3,$4,$5,$6::jsonb)',
     [input.workspaceId, input.projectId ?? null, input.taskId ?? null, input.actorId, input.action, JSON.stringify(input.metadata ?? {})],
@@ -58,7 +74,14 @@ export function registerCollaborationRoutes(app: Express, options: Collaboration
     return role
   }
 
+  function rejectDemoAction(res: Response) {
+    if (!(res.locals.sessionUser as { demo_instance_id?: string | null } | undefined)?.demo_instance_id) return false
+    res.status(403).json({ error: 'This action is unavailable in demo mode' })
+    return true
+  }
+
   app.get('/api/workspaces/:wid/invitations', requireUser, wrap(async (req, res) => {
+    if (rejectDemoAction(res)) return
     const workspaceId = uuid.parse(req.params.wid)
     const role = await actorRole(req, res, workspaceId)
     if (!role) return
@@ -71,6 +94,7 @@ export function registerCollaborationRoutes(app: Express, options: Collaboration
   }))
 
   app.post('/api/workspaces/:wid/invitations', requireUser, wrap(async (req, res) => {
+    if (rejectDemoAction(res)) return
     const workspaceId = uuid.parse(req.params.wid)
     const actor = await actorRole(req, res, workspaceId)
     if (!actor) return
@@ -125,6 +149,7 @@ export function registerCollaborationRoutes(app: Express, options: Collaboration
   }))
 
   app.delete('/api/workspaces/:wid/invitations/:iid', requireUser, wrap(async (req, res) => {
+    if (rejectDemoAction(res)) return
     const workspaceId = uuid.parse(req.params.wid); const invitationId = uuid.parse(req.params.iid)
     const actor = await actorRole(req, res, workspaceId)
     if (!actor) return
@@ -146,6 +171,7 @@ export function registerCollaborationRoutes(app: Express, options: Collaboration
   }))
 
   app.post('/api/invitations/:token/accept', requireUser, wrap(async (req, res) => {
+    if (rejectDemoAction(res)) return
     const tokenHash = createHash('sha256').update(String(req.params.token)).digest('hex')
     const invitationResult = await db.query<{ id: string; workspace_id: string; email: string; role: 'admin' | 'member'; status: string }>(`SELECT i.id,i.workspace_id,i.email,i.role,${invitationStatusSql} AS status FROM workspace_invitations i WHERE i.token_hash=$1`, [tokenHash])
     const invitation = invitationResult.rows[0]
@@ -169,6 +195,7 @@ export function registerCollaborationRoutes(app: Express, options: Collaboration
   }))
 
   app.patch('/api/workspaces/:wid/members/:uid', requireUser, wrap(async (req, res) => {
+    if (rejectDemoAction(res)) return
     const workspaceId = uuid.parse(req.params.wid); const targetId = uuid.parse(req.params.uid)
     const actor = await actorRole(req, res, workspaceId)
     if (!actor) return
@@ -184,6 +211,7 @@ export function registerCollaborationRoutes(app: Express, options: Collaboration
   }))
 
   app.delete('/api/workspaces/:wid/members/:uid', requireUser, wrap(async (req, res) => {
+    if (rejectDemoAction(res)) return
     const workspaceId = uuid.parse(req.params.wid); const targetId = uuid.parse(req.params.uid)
     const actor = await actorRole(req, res, workspaceId)
     if (!actor) return
@@ -221,9 +249,12 @@ export function registerCollaborationRoutes(app: Express, options: Collaboration
     const access = task.rows[0] ? await projectAccess(req.session.userId!, task.rows[0].project_id) : undefined
     if (!task.rows[0] || !access) { res.status(404).json({ error: 'Task not found' }); return }
     const { body } = commentInput.parse(req.body)
-    const created = await db.query<{ id: string }>('INSERT INTO comments(task_id,author_id,body) VALUES ($1,$2,$3) RETURNING id', [taskId, req.session.userId, body])
+    const demoInstanceId = (res.locals.sessionUser as { demo_instance_id?: string | null } | undefined)?.demo_instance_id
+    const commentId = demoInstanceId
+      ? await withDemoQuota(db, demoInstanceId, 'comments', async (client) => (await client.query<{ id: string }>('INSERT INTO comments(task_id,author_id,body) VALUES ($1,$2,$3) RETURNING id', [taskId, req.session.userId, body])).rows[0]!.id)
+      : (await db.query<{ id: string }>('INSERT INTO comments(task_id,author_id,body) VALUES ($1,$2,$3) RETURNING id', [taskId, req.session.userId, body])).rows[0]!.id
     await recordActivity(db, { workspaceId: access.workspace_id, projectId: task.rows[0].project_id, taskId, actorId: req.session.userId!, action: 'comment.created' })
-    const result = await db.query(`SELECT c.id,c.task_id,c.body,c.created_at,c.edited_at,u.id AS author_id,u.name AS author_name,u.email AS author_email,true AS can_edit,true AS can_delete FROM comments c JOIN users u ON u.id=c.author_id WHERE c.id=$1`, [created.rows[0]!.id])
+    const result = await db.query(`SELECT c.id,c.task_id,c.body,c.created_at,c.edited_at,u.id AS author_id,u.name AS author_name,u.email AS author_email,true AS can_edit,true AS can_delete FROM comments c JOIN users u ON u.id=c.author_id WHERE c.id=$1`, [commentId])
     res.status(201).json({ comment: result.rows[0] })
   }))
 

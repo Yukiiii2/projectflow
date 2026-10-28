@@ -1,4 +1,4 @@
-import { AlertCircle, Check, Eye, EyeOff, LoaderCircle, Moon, Sun, X } from 'lucide-react'
+import { AlertCircle, Check, Eye, EyeOff, LoaderCircle, Moon, PlayCircle, Sun, X } from 'lucide-react'
 import { useState, type FormEvent, type ReactNode } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { Brand } from '../components/Brand'
@@ -114,12 +114,13 @@ function WorkPreview() {
 export function AuthPage({ mode, theme, onToggleTheme }: AuthPageProps) {
   const navigate = useNavigate()
   const location = useLocation()
-  const { login, createAccount, notice, clearNotice, retrySession } = useAuth()
+  const { login, createAccount, enterDemo, notice, clearNotice, retrySession } = useAuth()
   const [values, setValues] = useState<Record<FieldName, string>>({ name: '', email: '', password: '', confirmPassword: '' })
   const [errors, setErrors] = useState<FieldErrors>({})
   const [formError, setFormError] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const [demoSubmitting, setDemoSubmitting] = useState(false)
   const isRegister = mode === 'register'
   const state = location.state as { from?: string } | null
   const routeMessage = (location.state as { message?: string } | null)?.message ?? ''
@@ -153,6 +154,19 @@ export function AuthPage({ mode, theme, onToggleTheme }: AuthPageProps) {
       setFormError(error instanceof ApiError ? error.message : 'ProjectFlow could not complete the request. Try again.')
     } finally {
       setSubmitting(false)
+    }
+  }
+
+  const tryDemo = async () => {
+    setDemoSubmitting(true)
+    setFormError('')
+    try {
+      await enterDemo()
+      navigate(destination, { replace: true })
+    } catch (error) {
+      setFormError(error instanceof ApiError ? error.message : 'ProjectFlow could not start the demo. Try again.')
+    } finally {
+      setDemoSubmitting(false)
     }
   }
 
@@ -254,11 +268,20 @@ export function AuthPage({ mode, theme, onToggleTheme }: AuthPageProps) {
               />
             )}
 
-            <button type="submit" className="button button--primary auth-submit" disabled={submitting}>
+            <button type="submit" className="button button--primary auth-submit" disabled={submitting || demoSubmitting}>
               {submitting && <LoaderCircle className="spin" size={17} aria-hidden="true" />}
               {submitting ? (isRegister ? 'Creating account…' : 'Signing in…') : (isRegister ? 'Create account' : 'Sign in')}
             </button>
           </form>
+
+          {!isRegister && <div className="auth-demo">
+            <div className="auth-demo__divider"><span>or explore without an account</span></div>
+            <button type="button" className="button button--secondary auth-demo__button" disabled={submitting || demoSubmitting} onClick={() => void tryDemo()}>
+              {demoSubmitting ? <LoaderCircle className="spin" size={17} aria-hidden="true" /> : <PlayCircle size={18} aria-hidden="true" />}
+              {demoSubmitting ? 'Preparing your demo…' : 'Try Demo'}
+            </button>
+            <p>Your private demo workspace is writable and is cleared after 30 minutes.</p>
+          </div>}
 
           <p className="auth-switch">
             {isRegister ? 'Already have an account?' : 'New to ProjectFlow?'}{' '}

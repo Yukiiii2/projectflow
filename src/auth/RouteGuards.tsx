@@ -4,7 +4,7 @@ import { Navigate, useLocation } from 'react-router-dom'
 import { Brand } from '../components/Brand'
 import { useAuth } from './AuthContext'
 
-function SessionLoader() {
+export function SessionLoader() {
   return (
     <main className="session-loader" aria-live="polite" aria-busy="true">
       <Brand />
@@ -37,5 +37,11 @@ export function PublicOnlyRoute({ children }: { children: ReactNode }) {
 export function VerifiedRoute({ children }: { children: ReactNode }) {
   const { user } = useAuth()
   if (user?.email_verification_required && user.email_verified === false) return <Navigate to="/verify-email" replace />
+  return children
+}
+
+export function NonDemoRoute({ children }: { children: ReactNode }) {
+  const { user } = useAuth()
+  if (user?.demo) return <Navigate to="/" replace />
   return children
 }

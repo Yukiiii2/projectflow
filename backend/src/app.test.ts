@@ -30,7 +30,8 @@ async function testContext() {
     'utf8',
   );
   const accountSecurity = await readFile(fileURLToPath(new URL('../sql/003_account_security.sql', import.meta.url)), 'utf8');
-  memory.public.none(`${migration.replace('CREATE EXTENSION IF NOT EXISTS pgcrypto;', '')}\n${collaboration}\n${accountSecurity}`);
+  const demo = await readFile(fileURLToPath(new URL('../sql/006_portfolio_demo.sql', import.meta.url)), 'utf8');
+  memory.public.none(`${migration.replace('CREATE EXTENSION IF NOT EXISTS pgcrypto;', '')}\n${collaboration}\n${accountSecurity}\n${demo}`);
   const adapter = memory.adapters.createPg();
   const pool = new adapter.Pool() as unknown as Pool;
   pools.push(pool);
@@ -72,7 +73,7 @@ describe('ProjectFlow API foundation', () => {
     await register(agent, 'database-error@example.com').expect(201);
     const originalQuery = pool.query.bind(pool);
     vi.spyOn(pool, 'query').mockImplementation((text: unknown, values?: unknown[]) => {
-      if (typeof text === 'string' && text.startsWith('SELECT session_version')) return Promise.reject(new Error('database unavailable'));
+      if (typeof text === 'string' && text.includes('SELECT u.session_version')) return Promise.reject(new Error('database unavailable'));
       return originalQuery(text as never, values as never);
     });
 

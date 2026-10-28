@@ -4,13 +4,14 @@ import { BrowserRouter, Navigate, Outlet, Route, Routes, useLocation, useNavigat
 import { AuthProvider, useAuth } from './auth/AuthContext'
 import { AuthPage } from './auth/AuthPage'
 import { ForgotPasswordPage, ResetPasswordPage, VerifyEmailPage } from './auth/AccountRecoveryPage'
-import { ProtectedRoute, PublicOnlyRoute, VerifiedRoute } from './auth/RouteGuards'
+import { NonDemoRoute, ProtectedRoute, PublicOnlyRoute, SessionLoader, VerifiedRoute } from './auth/RouteGuards'
 import { AppShell } from './components/AppShell'
 import { Dashboard } from './components/Dashboard'
 import { InvitationAcceptPage } from './collaboration/InvitationAcceptPage'
 import { TeamPage } from './collaboration/TeamPage'
 import type { DashboardPeriod, DashboardView } from './domain/types'
 import { KanbanBoard } from './kanban/KanbanBoard'
+import { LandingPage } from './landing/LandingPage'
 import type { ProjectTask } from './projects/api'
 import { buildDashboardWorkspace } from './projects/dashboardData'
 import { ProjectDialog } from './projects/ProjectDialog'
@@ -105,7 +106,7 @@ function ApplicationExperience({ theme, onToggleTheme }: { theme: Theme; onToggl
     <a href="#page-title" className="skip-link">Skip to main content</a>
     <AppShell
       user={user} workspace={dashboardWorkspace} workspaceOptions={workspaces} workspaceRole={selectedWorkspace.role} workspaceId={selectedWorkspace.id}
-      onWorkspaceChange={changeWorkspace} onCreateWorkspace={() => navigate('/workspaces/new')} theme={theme} onToggleTheme={onToggleTheme}
+      onWorkspaceChange={changeWorkspace} onCreateWorkspace={() => navigate('/workspaces/new')} allowWorkspaceCreation={!user.demo} theme={theme} onToggleTheme={onToggleTheme}
       sidebarCollapsed={sidebarCollapsed} onToggleSidebar={() => setSidebarCollapsed((value) => !value)} mobileDrawerOpen={mobileDrawerOpen}
       onMobileDrawerChange={setMobileDrawerOpen} onUnavailable={showUnavailable} onCreateTask={actions.openCreateTask}
       onSignOut={() => void handleSignOut()} signingOut={signingOut} currentPath={location.pathname} onRouteChange={navigate}
@@ -149,7 +150,11 @@ function KanbanRoute() {
   return <KanbanBoard onCreateTask={openCreateTask} onEditTask={openTask} />
 }
 
-function ProtectedApplication({ theme, onToggleTheme }: { theme: Theme; onToggleTheme: () => void }) {
+function AuthAwareApplication({ theme, onToggleTheme }: { theme: Theme; onToggleTheme: () => void }) {
+  const { notice, status } = useAuth()
+  const location = useLocation()
+  if (status === 'loading') return <SessionLoader />
+  if (status === 'unauthenticated' && location.pathname === '/' && !notice) return <LandingPage />
   return <ProtectedRoute><VerifiedRoute><WorkspaceGate theme={theme} onToggleTheme={onToggleTheme}><ProjectsProvider><ApplicationExperience theme={theme} onToggleTheme={onToggleTheme} /></ProjectsProvider></WorkspaceGate></VerifiedRoute></ProtectedRoute>
 }
 
@@ -168,9 +173,9 @@ export function App() {
     <Route path="/forgot-password" element={<PublicOnlyRoute><ForgotPasswordPage theme={theme} onToggleTheme={toggleTheme} /></PublicOnlyRoute>} />
     <Route path="/reset-password" element={<ResetPasswordPage theme={theme} onToggleTheme={toggleTheme} />} />
     <Route path="/verify-email" element={<VerifyEmailPage theme={theme} onToggleTheme={toggleTheme} />} />
-    <Route path="/workspaces/new" element={<ProtectedRoute><VerifiedRoute><WorkspaceGate theme={theme} onToggleTheme={toggleTheme}><WorkspaceSetup theme={theme} onToggleTheme={toggleTheme} /></WorkspaceGate></VerifiedRoute></ProtectedRoute>} />
-    <Route path="/invite/:token" element={<ProtectedRoute><VerifiedRoute><InvitationAcceptPage /></VerifiedRoute></ProtectedRoute>} />
-    <Route element={<ProtectedApplication theme={theme} onToggleTheme={toggleTheme} />}>
+    <Route path="/workspaces/new" element={<ProtectedRoute><VerifiedRoute><NonDemoRoute><WorkspaceGate theme={theme} onToggleTheme={toggleTheme}><WorkspaceSetup theme={theme} onToggleTheme={toggleTheme} /></WorkspaceGate></NonDemoRoute></VerifiedRoute></ProtectedRoute>} />
+    <Route path="/invite/:token" element={<ProtectedRoute><VerifiedRoute><NonDemoRoute><InvitationAcceptPage /></NonDemoRoute></VerifiedRoute></ProtectedRoute>} />
+    <Route element={<AuthAwareApplication theme={theme} onToggleTheme={toggleTheme} />}>
       <Route index element={<DashboardRoute />} />
       <Route path="projects" element={<ProjectsPage />} />
       <Route path="projects/:projectId" element={<ProjectDetailPage />} />

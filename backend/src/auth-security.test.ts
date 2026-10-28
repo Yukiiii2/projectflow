@@ -32,7 +32,7 @@ class CapturingDelivery implements InvitationDelivery {
 async function context(requireEmailVerification = true, emailOutbox?: Parameters<typeof createApp>[0]['emailOutbox']) {
   const memory = newDb({ autoCreateForeignKeyIndices: true })
   memory.public.registerFunction({ name: 'gen_random_uuid', returns: DataType.uuid, impure: true, implementation: randomUUID })
-  const files = await Promise.all(['001_init.sql', '002_collaboration.sql', '003_account_security.sql'].map((name) => readFile(fileURLToPath(new URL(`../sql/${name}`, import.meta.url)), 'utf8')))
+  const files = await Promise.all(['001_init.sql', '002_collaboration.sql', '003_account_security.sql', '006_portfolio_demo.sql'].map((name) => readFile(fileURLToPath(new URL(`../sql/${name}`, import.meta.url)), 'utf8')))
   memory.public.none(files.join('\n').replace('CREATE EXTENSION IF NOT EXISTS pgcrypto;', ''))
   memory.public.none('CREATE UNIQUE INDEX idx_auth_tokens_one_active ON auth_tokens(user_id, purpose) WHERE consumed_at IS NULL')
   const adapter = memory.adapters.createPg()

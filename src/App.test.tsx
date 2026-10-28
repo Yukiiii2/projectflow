@@ -87,7 +87,7 @@ describe('ProjectFlow Stage 1 prototype', () => {
     render(<App />)
 
     await screen.findByRole('heading', { name: 'Dashboard' })
-    await user.click(screen.getByRole('button', { name: 'Open Maya Chen profile menu' }))
+    await user.click(screen.getByRole('button', { name: /Maya Chen.*profile menu/i }))
     expect(screen.getByRole('menu', { name: 'Profile menu' })).toBeInTheDocument()
 
     await user.click(screen.getByRole('menuitem', { name: 'Profile settings' }))

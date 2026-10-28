@@ -42,7 +42,7 @@ Set secret fields directly in Render. Never place them in GitHub, chat, screensh
 - `EMAIL_OUTBOX_KEY`: independent canonical base64 encoding of 32 random bytes, used for AES-256-GCM queued-email payloads.
 - `INVITATION_FROM`: verified sender such as `ProjectFlow <invites@example.com>`.
 
-The Blueprint supplies non-secret values for Node.js 24, `NODE_ENV`, proxy hops, token lifetimes, `INVITATION_DELIVERY=resend`, and log level. Do not add `MIGRATION_DATABASE_URL` to the Render web service: it belongs only in the protected operator environment while migrations run.
+The Blueprint supplies non-secret values for Node.js 24, `NODE_ENV`, proxy hops, token lifetimes, `INVITATION_DELIVERY=resend`, log level, and `DEMO_MODE_ENABLED=false`. Do not add `MIGRATION_DATABASE_URL` to the Render web service: it belongs only in the protected operator environment while migrations run.
 
 `RESEND_API_KEY` does not select the delivery transport. The Render service must also contain `INVITATION_DELIVERY` with the exact lowercase value `resend`, plus a verified `INVITATION_FROM`. A missing, differently cased, or whitespace-padded selector is rejected before the API key is inspected; never work around that guard with preview delivery in production.
 
@@ -62,6 +62,7 @@ Render supplies `PORT`; do not hard-code or override it. Do not configure `VITE_
 10. Verify invitation, verification, and reset delivery through the Resend HTTPS API without copying tokens into logs.
 
 Before a verified domain is available, application behavior may be exercised locally with `npm --prefix backend run verify:email:browser` after `npm run build:all`. This harness is not a substitute for hosted delivery: it refuses remote PostgreSQL, uses an isolated local schema, exposes no inbox route, and is excluded from production artifacts.
+10a. Before enabling the portfolio demo, keep `DEMO_MODE_ENABLED=false`, create a Neon recovery point, apply migration `006_portfolio_demo.sql` with the direct `MIGRATION_DATABASE_URL`, replay migrations to confirm all six files are current, and verify the pooled runtime role can perform DML on `demo_instances` while still lacking migration/schema privileges. Deploy the reviewed code with demo mode disabled first. After health/auth checks pass, set `DEMO_MODE_ENABLED=true` in Render and verify two independent browser sessions, cross-workspace 404 behavior, quotas, expiry cleanup, and logout cleanup. Disable the switch immediately if capacity, abuse, or cleanup behavior is abnormal.
 11. Confirm `email_outbox` drains after successful deliveries and retries provider failures without logging payloads.
 12. Remove only the isolated test records and confirm no temporary accounts remain.
 13. Configure an external uptime check for `/api/health` and an error-monitoring project.

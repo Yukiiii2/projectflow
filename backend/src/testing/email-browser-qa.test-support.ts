@@ -322,7 +322,7 @@ try {
   monitor(restoredPage, origin, apiBodies, consoleMessages, browserErrors)
   await signIn(restoredPage, accounts.owner.email, originalPassword)
 
-  await ownerPage.getByRole('button', { name: `Open ${accounts.owner.name} profile menu` }).click()
+  await ownerPage.getByRole('button', { name: new RegExp(`${accounts.owner.name}.*profile menu`, 'i') }).click()
   await ownerPage.getByRole('menuitem', { name: 'Sign out' }).click()
   await ownerPage.getByRole('heading', { name: 'Welcome back' }).waitFor()
   await ownerPage.goto('/forgot-password', { waitUntil: 'networkidle' })
@@ -350,7 +350,7 @@ try {
   const invalidatedOldSession = await browserApi(restoredPage, '/api/workspaces')
   assert(invalidatedOldSession.status === 401, 'Password reset did not invalidate an older session')
   await signIn(ownerPage, accounts.owner.email, replacementPassword)
-  await ownerPage.getByRole('button', { name: `Open ${accounts.owner.name} profile menu` }).click()
+  await ownerPage.getByRole('button', { name: new RegExp(`${accounts.owner.name}.*profile menu`, 'i') }).click()
   await ownerPage.getByRole('menuitem', { name: 'Sign out' }).click()
   await ownerPage.getByRole('heading', { name: 'Welcome back' }).waitFor()
   const anonymousWorkspaces = await browserApi(ownerPage, '/api/workspaces')

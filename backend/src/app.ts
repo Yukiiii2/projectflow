@@ -12,9 +12,10 @@ import { previewInvitationDelivery, type InvitationDelivery } from './invitation
 import { createLogger, requestLogging, type Logger } from './logger.js';
 import { activeAuthToken, authTokenOwner, issueAuthToken, issueAuthTokenInTransaction } from './auth-tokens.js';
 import type { EmailOutbox } from './email-outbox.js';
+import { createDemoInstance, deleteDemoInstance, DemoCapacityError, DemoExpiredError, DemoQuotaError, DEMO_LIMITS, withDemoQuota } from './demo.js';
 
 declare module 'express-session' { interface SessionData { userId?: string; sessionVersion?: number } }
-export interface AppConfig { frontendOrigin: string; sessionSecret: string; production: boolean; invitationTtlHours?: number; verificationTtlMinutes?: number; passwordResetTtlMinutes?: number; trustProxyHops?: number; requireEmailVerification?: boolean; recoveryResponseFloorMs?: number }
+export interface AppConfig { frontendOrigin: string; sessionSecret: string; production: boolean; invitationTtlHours?: number; verificationTtlMinutes?: number; passwordResetTtlMinutes?: number; trustProxyHops?: number; requireEmailVerification?: boolean; recoveryResponseFloorMs?: number; demoModeEnabled?: boolean }
 export interface AppOptions { db: Pool; sessionStore: Store; config: AppConfig; invitationDelivery?: InvitationDelivery; emailOutbox?: EmailOutbox; staticAssetsPath?: string; logger?: Logger }
 
 const id = z.string().uuid();
@@ -169,14 +170,30 @@ export function createApp({ db, sessionStore, config, invitationDelivery = previ
     legacyHeaders: false,
     handler: (_req, res) => res.status(429).json({ error: 'Too many recovery attempts. Try again later.' }),
   });
+  const demoLimiter = rateLimit({
+    windowMs: 60 * 60 * 1000,
+    limit: 5,
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    handler: (_req, res) => res.status(429).json({ error: 'Too many demo sessions. Try again later.' }),
+  });
+  type SessionUser = { session_version: number; email_verified_at: string | null; demo_instance_id: string | null; demo_expires_at: Date | string | null };
+  const destroySession = (req: Request) => new Promise<void>((resolve, reject) => req.session.destroy((error) => error ? reject(error) : resolve()));
   const requireSession = (req: Request, res: Response, next: NextFunction) => {
     if (!req.session.userId || req.session.sessionVersion === undefined) { res.status(401).json({ error: 'Sign in required' }); return; }
-    void db.query<{ session_version: number; email_verified_at: string | null }>('SELECT session_version,email_verified_at FROM users WHERE id=$1', [req.session.userId])
-      .then((result) => {
+    void db.query<SessionUser>(`SELECT u.session_version,u.email_verified_at,u.demo_instance_id,d.expires_at AS demo_expires_at
+      FROM users u LEFT JOIN demo_instances d ON d.id=u.demo_instance_id WHERE u.id=$1`, [req.session.userId])
+      .then(async (result) => {
         const user = result.rows[0];
         if (!user || user.session_version !== req.session.sessionVersion) {
           req.session.destroy(() => undefined);
           res.status(401).json({ error: 'Sign in required' }); return;
+        }
+        if (user.demo_instance_id && (!user.demo_expires_at || new Date(user.demo_expires_at).getTime() <= Date.now())) {
+          const instanceId = user.demo_instance_id;
+          await destroySession(req);
+          await deleteDemoInstance(db, instanceId);
+          res.status(401).json({ error: 'Demo session expired' }); return;
         }
         res.locals.sessionUser = user;
         next();
@@ -193,6 +210,7 @@ export function createApp({ db, sessionStore, config, invitationDelivery = previ
       next();
     });
   };
+  const demoInstanceId = (res: Response) => (res.locals.sessionUser as SessionUser | undefined)?.demo_instance_id ?? undefined;
   async function membership(userId: string, workspaceId: string) {
     const result = await db.query<{ role: string }>('SELECT role FROM workspace_members WHERE user_id=$1 AND workspace_id=$2', [userId, workspaceId]);
     return result.rows[0]?.role;
@@ -262,9 +280,29 @@ export function createApp({ db, sessionStore, config, invitationDelivery = previ
       req.session.save((saveError) => saveError ? res.status(500).json({ error: 'Session save failed' }) : res.status(201).json({ user, verification_delivery: verificationDelivery }));
     });
   }));
+  const requireDemoMode = (_req: Request, res: Response, next: NextFunction) => {
+    if (!config.demoModeEnabled) { res.status(404).json({ error: 'Route not found' }); return; }
+    next();
+  };
+  app.post('/api/auth/demo', requireDemoMode, demoLimiter, wrap(async (req, res) => {
+    z.object({}).strict().parse(req.body);
+    if (req.session.userId) { res.status(409).json({ error: 'Sign out before starting another demo' }); return; }
+    const identity = await createDemoInstance(db);
+    try {
+      await new Promise<void>((resolve, reject) => req.session.regenerate((error) => error ? reject(error) : resolve()));
+      req.session.userId = identity.user.id;
+      req.session.sessionVersion = 0;
+      req.session.cookie.maxAge = DEMO_LIMITS.lifetimeMinutes * 60_000;
+      await new Promise<void>((resolve, reject) => req.session.save((error) => error ? reject(error) : resolve()));
+    } catch (error) {
+      await deleteDemoInstance(db, identity.instanceId);
+      throw error;
+    }
+    res.status(201).json({ user: identity.user });
+  }));
   app.post('/api/auth/login', loginLimiter, wrap(async (req, res) => {
     const body = login.parse(req.body);
-    const result = await db.query<{ id: string; name: string; email: string; password_hash: string; session_version: number; email_verified_at: string | null }>('SELECT id,name,email,password_hash,session_version,email_verified_at FROM users WHERE email=$1', [body.email]);
+    const result = await db.query<{ id: string; name: string; email: string; password_hash: string; session_version: number; email_verified_at: string | null }>('SELECT id,name,email,password_hash,session_version,email_verified_at FROM users WHERE email=$1 AND demo_instance_id IS NULL', [body.email]);
     const user = result.rows[0];
     if (!user || !(await argon2.verify(user.password_hash, body.password))) { res.status(401).json({ error: 'Invalid email or password' }); return; }
     req.session.regenerate((error) => {
@@ -274,18 +312,22 @@ export function createApp({ db, sessionStore, config, invitationDelivery = previ
       req.session.save((saveError) => saveError ? res.status(500).json({ error: 'Session save failed' }) : res.json({ user: { id: user.id, name: user.name, email: user.email, email_verified: Boolean(user.email_verified_at), email_verification_required: Boolean(config.requireEmailVerification) } }));
     });
   }));
-  app.post('/api/auth/logout', requireSession, (req, res, next) => req.session.destroy((error) => {
-    if (error) { next(error); return; }
+  app.post('/api/auth/logout', requireSession, wrap(async (req, res) => {
+    const instanceId = demoInstanceId(res);
+    await destroySession(req);
+    if (instanceId) await deleteDemoInstance(db, instanceId);
     res.clearCookie(sessionCookieName, { httpOnly: cookie.httpOnly, secure: cookie.secure, sameSite: cookie.sameSite, path: cookie.path });
     res.status(204).end();
   }));
   app.get('/api/auth/me', requireSession, wrap(async (req, res) => {
-    const result = await db.query<{ id: string; name: string; email: string; created_at: string; email_verified_at: string | null }>('SELECT id,name,email,created_at,email_verified_at FROM users WHERE id=$1', [req.session.userId]);
+    const result = await db.query<{ id: string; name: string; email: string; created_at: string; email_verified_at: string | null; demo_instance_id: string | null; demo_expires_at: string | null }>(`SELECT u.id,u.name,u.email,u.created_at,u.email_verified_at,u.demo_instance_id,d.expires_at AS demo_expires_at
+      FROM users u LEFT JOIN demo_instances d ON d.id=u.demo_instance_id WHERE u.id=$1`, [req.session.userId]);
     if (!result.rows[0]) { res.status(401).json({ error: 'Sign in required' }); return; }
     const user = result.rows[0];
-    res.json({ user: { id: user.id, name: user.name, email: user.email, created_at: user.created_at, email_verified: Boolean(user.email_verified_at), email_verification_required: Boolean(config.requireEmailVerification) } });
+    res.json({ user: { id: user.id, name: user.name, email: user.email, created_at: user.created_at, email_verified: Boolean(user.email_verified_at), email_verification_required: Boolean(config.requireEmailVerification), demo: Boolean(user.demo_instance_id), ...(user.demo_expires_at ? { demo_expires_at: new Date(user.demo_expires_at).toISOString() } : {}) } });
   }));
   app.post('/api/auth/email-verification/request', requireSession, recoveryLimiter, wrap(async (req, res) => {
+    if (demoInstanceId(res)) { res.status(403).json({ error: 'Demo accounts cannot manage verification' }); return; }
     const result = await db.query<{ id: string; name: string; email: string; email_verified_at: string | null }>('SELECT id,name,email,email_verified_at FROM users WHERE id=$1', [req.session.userId]);
     const user = result.rows[0];
     if (!user) { res.status(401).json({ error: 'Sign in required' }); return; }
@@ -315,7 +357,7 @@ export function createApp({ db, sessionStore, config, invitationDelivery = previ
   app.post('/api/auth/password-reset/request', recoveryLimiter, wrap(async (req, res) => {
     const responseStartedAt = Date.now();
     const { email } = emailOnly.parse(req.body);
-    const result = await db.query<{ id: string; name: string; email: string }>('SELECT id,name,email FROM users WHERE email=$1', [email]);
+    const result = await db.query<{ id: string; name: string; email: string }>('SELECT id,name,email FROM users WHERE email=$1 AND demo_instance_id IS NULL', [email]);
     const user = result.rows[0];
     if (user) {
       try {
@@ -354,6 +396,7 @@ export function createApp({ db, sessionStore, config, invitationDelivery = previ
     res.json({ workspaces: result.rows });
   }));
   app.post('/api/workspaces', requireUser, wrap(async (req, res) => {
+    if (demoInstanceId(res)) { res.status(403).json({ error: 'Demo accounts cannot create workspaces' }); return; }
     const { name } = workspaceSchema.parse(req.body); const client = await db.connect();
     try {
       await client.query('BEGIN');
@@ -385,8 +428,11 @@ export function createApp({ db, sessionStore, config, invitationDelivery = previ
     if (!role) { res.status(404).json({ error: 'Workspace not found' }); return; }
     if (!['owner', 'admin'].includes(role)) { res.status(403).json({ error: 'Insufficient permissions' }); return; }
     const body = projectSchema.parse(req.body);
-    const result = await db.query<{ id: string }>('INSERT INTO projects(workspace_id,name,description) VALUES ($1,$2,$3) RETURNING id', [workspaceId, body.name, body.description]);
-    res.status(201).json({ project: await projectSummary(result.rows[0]!.id) });
+    const instanceId = demoInstanceId(res);
+    const projectId = instanceId
+      ? await withDemoQuota(db, instanceId, 'projects', async (client) => (await client.query<{ id: string }>('INSERT INTO projects(workspace_id,name,description) VALUES ($1,$2,$3) RETURNING id', [workspaceId, body.name, body.description])).rows[0]!.id)
+      : (await db.query<{ id: string }>('INSERT INTO projects(workspace_id,name,description) VALUES ($1,$2,$3) RETURNING id', [workspaceId, body.name, body.description])).rows[0]!.id;
+    res.status(201).json({ project: await projectSummary(projectId) });
   }));
   app.get('/api/projects/:pid', requireUser, wrap(async (req, res) => {
     const projectId = id.parse(req.params.pid);
@@ -421,9 +467,12 @@ export function createApp({ db, sessionStore, config, invitationDelivery = previ
     if (!access) { res.status(404).json({ error: 'Project not found' }); return; }
     const body = taskSchema.parse(req.body);
     if (!(await validAssignee(access.workspace_id, body.assigneeId))) { res.status(400).json({ error: 'Assignee must be a workspace member' }); return; }
-    const result = await db.query<{ id: string }>('INSERT INTO tasks(project_id,title,description,status,priority,due_date,assignee_id) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id', [projectId, body.title, body.description, body.status, body.priority, body.dueDate ?? null, body.assigneeId ?? null]);
-    const createdTask = await taskDetail(result.rows[0]!.id);
-    await recordActivity(db, { workspaceId: access.workspace_id, projectId, taskId: result.rows[0]!.id, actorId: req.session.userId!, action: 'task.created', metadata: { title: body.title } });
+    const instanceId = demoInstanceId(res);
+    const taskId = instanceId
+      ? await withDemoQuota(db, instanceId, 'tasks', async (client) => (await client.query<{ id: string }>('INSERT INTO tasks(project_id,title,description,status,priority,due_date,assignee_id) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id', [projectId, body.title, body.description, body.status, body.priority, body.dueDate ?? null, body.assigneeId ?? null])).rows[0]!.id)
+      : (await db.query<{ id: string }>('INSERT INTO tasks(project_id,title,description,status,priority,due_date,assignee_id) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id', [projectId, body.title, body.description, body.status, body.priority, body.dueDate ?? null, body.assigneeId ?? null])).rows[0]!.id;
+    const createdTask = await taskDetail(taskId);
+    await recordActivity(db, { workspaceId: access.workspace_id, projectId, taskId, actorId: req.session.userId!, action: 'task.created', metadata: { title: body.title } });
     res.status(201).json({ task: createdTask });
   }));
   app.patch('/api/tasks/:tid', requireUser, wrap(async (req, res) => {
@@ -458,6 +507,9 @@ export function createApp({ db, sessionStore, config, invitationDelivery = previ
     app.use((_req, res) => res.status(404).json({ error: 'Route not found' }));
   }
   app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
+    if (error instanceof DemoQuotaError) { res.status(409).json({ error: error.message }); return; }
+    if (error instanceof DemoCapacityError) { res.status(503).json({ error: 'Demo capacity is temporarily full' }); return; }
+    if (error instanceof DemoExpiredError) { res.status(401).json({ error: 'Demo session expired' }); return; }
     if (error instanceof ZodError) { res.status(400).json({ error: 'Invalid request', details: z.flattenError(error) }); return; }
     if (malformedJson(error)) { res.status(400).json({ error: 'Invalid JSON body' }); return; }
     if (oversizedBody(error)) { res.status(413).json({ error: 'Request body is too large' }); return; }

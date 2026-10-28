@@ -23,6 +23,9 @@ services:
         value: "1"
       - key: REQUIRE_EMAIL_VERIFICATION
         value: "true"
+      # Keep disabled until migration 006 and runtime grants are verified on Neon.
+      - key: DEMO_MODE_ENABLED
+        value: "false"
       - key: INVITATION_TTL_HOURS
         value: "168"
       - key: VERIFICATION_TTL_MINUTES

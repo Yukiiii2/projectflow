@@ -11,6 +11,7 @@ export interface ServerConfig {
   trustProxyHops: number
   logLevel: 'debug' | 'info' | 'warn' | 'error'
   emailOutboxKey?: Buffer
+  demoModeEnabled: boolean
 }
 
 function isPlaceholder(value: string | undefined) {
@@ -109,5 +110,6 @@ export function loadServerConfig(environment: NodeJS.ProcessEnv): ServerConfig {
     trustProxyHops: integer(environment.TRUST_PROXY_HOPS, production ? 1 : 1, 'TRUST_PROXY_HOPS', 1, 3),
     logLevel: logLevel as ServerConfig['logLevel'],
     emailOutboxKey,
+    demoModeEnabled: boolean(environment.DEMO_MODE_ENABLED, false, 'DEMO_MODE_ENABLED'),
   }
 }

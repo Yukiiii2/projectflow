@@ -39,6 +39,7 @@ const app = createApp({
     passwordResetTtlMinutes: config.passwordResetTtlMinutes,
     trustProxyHops: config.trustProxyHops,
     requireEmailVerification: config.requireEmailVerification,
+    demoModeEnabled: config.demoModeEnabled,
   },
 });
 

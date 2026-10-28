@@ -1,7 +1,8 @@
 import { randomBytes } from 'node:crypto'
-import { readFile } from 'node:fs/promises'
+import { readdir } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { Pool } from 'pg'
+import { runMigrations } from '../migrations.js'
 
 export interface IsolatedEmailQaDatabase {
   pool: Pool
@@ -21,18 +22,12 @@ export async function createIsolatedEmailQaDatabase(databaseUrl: string): Promis
   const pool = new Pool({ connectionString: scopedUrl.toString() })
   let disposed = false
   await admin.query(`CREATE SCHEMA "${schema}"`)
-  const migrationNames = [
-    '001_init.sql',
-    '002_collaboration.sql',
-    '003_account_security.sql',
-    '004_runtime_operations.sql',
-    '005_email_outbox_retention.sql',
-  ]
+  const directory = fileURLToPath(new URL('../../sql/', import.meta.url))
+  const migrationNames = (await readdir(directory)).filter((name) => /^\d+.*\.sql$/.test(name)).sort()
   try {
-    for (const name of migrationNames) {
-      const sql = await readFile(fileURLToPath(new URL(`../../sql/${name}`, import.meta.url)), 'utf8')
-      await pool.query(sql.replace('CREATE EXTENSION IF NOT EXISTS pgcrypto;', ''))
-    }
+    const first = await runMigrations(pool, directory)
+    const replay = await runMigrations(pool, directory)
+    if (first.applied.length !== migrationNames.length || replay.skipped.length !== migrationNames.length) throw new Error('Disposable schema migration replay was incomplete')
   } catch (error) {
     await pool.end()
     await admin.query(`DROP SCHEMA "${schema}" CASCADE`)

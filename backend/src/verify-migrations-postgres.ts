@@ -15,11 +15,11 @@ try {
   if (JSON.stringify(ledger.rows.map((row) => row.name)) !== JSON.stringify(expected)) {
     throw new Error('Migration ledger does not match the numbered SQL files')
   }
-  const runtimeObjects = await pool.query<{ session_table: string | null; outbox_table: string | null; active_token_index: string | null }>(
-    "SELECT to_regclass('public.session')::text AS session_table, to_regclass('public.email_outbox')::text AS outbox_table, to_regclass('public.idx_auth_tokens_one_active')::text AS active_token_index",
+  const runtimeObjects = await pool.query<{ session_table: string | null; outbox_table: string | null; active_token_index: string | null; demo_table: string | null }>(
+    "SELECT to_regclass('public.session')::text AS session_table, to_regclass('public.email_outbox')::text AS outbox_table, to_regclass('public.idx_auth_tokens_one_active')::text AS active_token_index, to_regclass('public.demo_instances')::text AS demo_table",
   )
-  if (!runtimeObjects.rows[0]?.session_table || !runtimeObjects.rows[0]?.outbox_table || !runtimeObjects.rows[0]?.active_token_index) {
-    throw new Error('Runtime session, outbox, or active-token migration object is missing')
+  if (!runtimeObjects.rows[0]?.session_table || !runtimeObjects.rows[0]?.outbox_table || !runtimeObjects.rows[0]?.active_token_index || !runtimeObjects.rows[0]?.demo_table) {
+    throw new Error('Runtime session, outbox, active-token, or demo migration object is missing')
   }
   console.log(`PostgreSQL migration verification passed (${expected.length} tracked migrations, concurrent runners serialized).`)
 } finally {

@@ -14,6 +14,7 @@ interface AuthContextValue {
   expireSession: () => void
   login: (email: string, password: string) => Promise<void>
   createAccount: (name: string, email: string, password: string) => Promise<void>
+  enterDemo: () => Promise<void>
   logout: () => Promise<void>
 }
 
@@ -97,6 +98,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     createAccount: async (name, email, password) => {
       const authenticatedUser = await authApi.register(name, email, password)
       setUser(authenticatedUser)
+      setStatus('authenticated')
+      setNotice('')
+    },
+    enterDemo: async () => {
+      const demoUser = await authApi.startDemo()
+      setUser(demoUser)
       setStatus('authenticated')
       setNotice('')
     },

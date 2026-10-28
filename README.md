@@ -2,7 +2,7 @@
 
 ProjectFlow is a responsive, full-stack project management application for freelancers and small teams. It combines workspace isolation, projects, tasks, a keyboard-accessible Kanban workflow, invitations, comments, and activity history in a polished dark-first interface.
 
-This repository is a portfolio application built from the approved **Modern Professional** design direction. Stages A–F and the local Stage G2 deployment-readiness implementation are complete. The application is not deployed; provider-specific TLS, email, backup, monitoring, and recovery behavior remains unverified until an approved hosted release.
+This repository is a portfolio application built from the approved **Modern Professional** design direction. A Render/Neon instance is live, and the secure portfolio demo plus premium landing page follow the controlled rollout documented in the deployment runbook. Portfolio demo mode remains disabled by default until migration, runtime grants, health, and isolation checks pass. Arbitrary-recipient email delivery remains constrained by Resend's test-sender restrictions until a sending domain is verified.
 
 ![ProjectFlow dashboard](./docs/images/dashboard.png)
 
@@ -95,7 +95,7 @@ Frontend:
 VITE_API_URL=http://localhost:4000
 ```
 
-Backend variables include `DATABASE_URL`, `SESSION_SECRET`, `FRONTEND_ORIGIN`, token lifetimes, proxy trust, verification policy, logging, Resend API configuration, and `EMAIL_OUTBOX_KEY`. Generate unique session and 32-byte base64 outbox-encryption keys and keep both `.env` files local. Production requires an exact HTTPS origin, a TLS PostgreSQL URL containing `sslmode=require` or stronger, verified email delivery, and email verification. Production migrations use a separate operator-only `MIGRATION_DATABASE_URL` so the normal application can retain Neon's pooled `DATABASE_URL`. See [backend/.env.example](./backend/.env.example) for the complete safe template.
+Backend variables include `DATABASE_URL`, `SESSION_SECRET`, `FRONTEND_ORIGIN`, token lifetimes, proxy trust, verification policy, logging, Resend API configuration, `EMAIL_OUTBOX_KEY`, and the disabled-by-default `DEMO_MODE_ENABLED` switch. Generate unique session and 32-byte base64 outbox-encryption keys and keep both `.env` files local. Production requires an exact HTTPS origin, a TLS PostgreSQL URL containing `sslmode=require` or stronger, verified email delivery, and email verification. Production migrations use a separate operator-only `MIGRATION_DATABASE_URL` so the normal application can retain Neon's pooled `DATABASE_URL`. See [backend/.env.example](./backend/.env.example) for the complete safe template.
 
 ## PostgreSQL setup on Windows
 
@@ -122,6 +122,30 @@ npm.cmd run db:migrate
 ```
 
 The migration runner applies each pending migration in `backend/sql` in order. It serializes concurrent runs with a PostgreSQL advisory lock, wraps each file in a transaction, and records SHA-256 checksums in `schema_migrations`. Applied migration files must never be edited. It does not use Prisma.
+
+## Portfolio demo mode
+
+ProjectFlow has an auth-aware public root route. An unauthenticated visitor to `/` sees the public product landing page; a restored authenticated session at `/` continues directly to the existing dashboard. Protected deep links retain their sign-in redirects, and session restoration completes before either root experience renders. The landing page uses responsive captures generated from the real locally seeded dashboard and Kanban UI, with no fabricated product claims or statistics.
+
+Portfolio demo mode is an explicit, production-safe opt-in. With migration `006_portfolio_demo.sql` applied and `DEMO_MODE_ENABLED=true`, **Try Live Demo** on the landing page (or **Try Demo** on sign-in) creates a private, writable workspace for one browser session. Each instance receives a disabled-login demo identity, two synthetic teammates, three projects, twelve tasks, comments, and activity. Normal registration, email verification, password recovery, and real workspaces are unchanged.
+
+Demo instances expire after 30 minutes. Expired data is removed on the next demo creation or expired-session request, and logout removes the current instance immediately, so no paid background worker is required. Creation is limited to five attempts per IP per hour and 25 active instances; each instance is capped at five projects, 40 tasks, 50 comments, and 200 activity entries. Demo users cannot create workspaces, deliver invitations, accept invitations, manage membership, change account credentials, or authenticate with the generated `.invalid` email address.
+
+Keep `DEMO_MODE_ENABLED=false` until migration 006 has been applied through the direct migration connection and the pooled runtime role has been verified against `demo_instances`. The local browser harness uses only a loopback PostgreSQL URL and an isolated disposable schema:
+
+```powershell
+npm.cmd run build:all
+$env:PROJECTFLOW_LOCAL_ENV_PATH = '<private path to a local backend .env>'
+npm.cmd --prefix backend run verify:demo:browser
+npm.cmd --prefix backend run verify:landing:browser
+```
+
+The reproducible preview-capture command uses the same loopback-only disposable-schema safeguards and cleans up its temporary demo before exiting:
+
+```powershell
+$env:PROJECTFLOW_LOCAL_ENV_PATH = '<private path to a local backend .env>'
+npm.cmd --prefix backend run verify:capture:landing
+```
 
 ## Installation and local development
 
@@ -219,16 +243,18 @@ Completed and locally verified:
 - Stage G3A — Free-tier deployment compatibility
 - Stage G3B — Neon initialization and least-privilege runtime role
 - Stage G3C — local Render Free deployment readiness
+- Secure portfolio demo — private writable 30-minute sessions with bounded cleanup
+- Premium public landing page — auth-aware root routing and responsive real-product previews
 
 ## Deployment readiness
 
 The approved target is one Render Free web service serving both Express `/api` routes and the compiled Vite application, with Neon Free PostgreSQL and the Resend Free HTTPS API. The committed `render.yaml` contains no credentials and deploys only after the required GitHub checks pass. GitHub Actions runs on Node.js 24 LTS and covers frontend/backend tests, three backend timezone variants, typechecks, full Render artifact builds, high-severity dependency audits, a real PostgreSQL concurrent-migration check, and an isolated `pg_dump`/`pg_restore` recovery rehearsal with a failed-migration rollback probe.
 
-Read [the deployment runbook](./docs/DEPLOYMENT-RUNBOOK.md) and [database recovery procedure](./docs/DATABASE-RECOVERY.md) before creating resources. A hosted deployment still requires explicit approval.
+Read [the deployment runbook](./docs/DEPLOYMENT-RUNBOOK.md) and [database recovery procedure](./docs/DATABASE-RECOVERY.md) before changing hosted resources. Production changes require explicit operator approval and must preserve the documented migration, health, rollback, and demo-activation gates.
 
 ## Known limitations and deployment blockers
 
-- No public deployment or production environment has been verified.
+- Portfolio demo mode is disabled by default and must not be enabled until migration 006, least-privilege runtime grants, deployment health, and live isolation checks pass.
 - Resend HTTPS API delivery is implemented, but live provider delivery, sender DNS, bounce handling, and account recovery email receipt have not been verified.
 - Rate limits use process memory and require a shared store for multiple API instances.
 - Local production configuration, CSP/HSTS, proxy assumptions, TLS database validation, migration safety, and structured redacted logs are implemented; their behavior through Render and Neon remains a hosted verification gate.
@@ -256,4 +282,6 @@ Read [the deployment runbook](./docs/DEPLOYMENT-RUNBOOK.md) and [database recove
 - [Stage G2 readiness checkpoint](./STAGE-G2-READINESS-CHECKPOINT.md)
 - [Deployment runbook](./docs/DEPLOYMENT-RUNBOOK.md)
 - [Database recovery procedure](./docs/DATABASE-RECOVERY.md)
+- [Portfolio demo checkpoint](./PORTFOLIO-DEMO-CHECKPOINT.md)
+- [Landing page checkpoint](./LANDING-PAGE-CHECKPOINT.md)
 - [Backend setup and API reference](./backend/README.md)

@@ -44,6 +44,7 @@ describe('production readiness configuration', () => {
     ['Resend testing sender', { INVITATION_FROM: 'ProjectFlow <onboarding@resend.dev>' }, 'verified custom domain'],
     ['disabled verification', { REQUIRE_EMAIL_VERIFICATION: 'false' }, 'email verification'],
     ['invalid proxy hops', { TRUST_PROXY_HOPS: '0' }, 'TRUST_PROXY_HOPS'],
+    ['invalid demo switch', { DEMO_MODE_ENABLED: 'yes' }, 'DEMO_MODE_ENABLED'],
     ['placeholder Resend secret', { RESEND_API_KEY: 'REPLACE_WITH_RESEND_API_KEY' }, 'placeholder'],
     ['invalid outbox key', { EMAIL_OUTBOX_KEY: 'not-a-32-byte-key' }, 'EMAIL_OUTBOX_KEY'],
   ])('rejects %s in production', (_label, override, message) => {
@@ -60,6 +61,18 @@ describe('production readiness configuration', () => {
       EMAIL_OUTBOX_KEY: outboxKey,
       ...override,
     })).toThrow(message)
+  })
+
+  it('keeps portfolio demo mode disabled unless it is explicitly enabled', () => {
+    expect(loadServerConfig({
+      DATABASE_URL: 'postgresql://local:local@localhost/projectflow',
+      SESSION_SECRET: 'a-development-session-secret-with-32-characters',
+    }).demoModeEnabled).toBe(false)
+    expect(loadServerConfig({
+      DATABASE_URL: 'postgresql://local:local@localhost/projectflow',
+      SESSION_SECRET: 'a-development-session-secret-with-32-characters',
+      DEMO_MODE_ENABLED: 'true',
+    }).demoModeEnabled).toBe(true)
   })
 })
 

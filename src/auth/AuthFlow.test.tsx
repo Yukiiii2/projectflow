@@ -42,8 +42,66 @@ afterEach(() => {
 })
 
 describe('frontend authentication integration', () => {
+  it('renders the public landing page at the root for an unauthenticated visitor', async () => {
+    fetchMock.mockReturnValueOnce(jsonResponse(401, { error: 'Sign in required' }))
+    render(<App />)
+
+    expect(await screen.findByRole('heading', { name: 'Bring clarity to every project.' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Welcome back' })).not.toBeInTheDocument()
+    expect(window.location.pathname).toBe('/')
+  })
+
+  it('waits for session restoration before choosing the public or authenticated root', async () => {
+    let resolveSession!: (response: Response) => void
+    fetchMock
+      .mockReturnValueOnce(new Promise<Response>((resolve) => { resolveSession = resolve }))
+      .mockReturnValueOnce(jsonResponse(200, { workspaces: [workspace] }))
+      .mockReturnValueOnce(jsonResponse(200, { projects: projectFixtures(workspace.id) }))
+      .mockReturnValueOnce(jsonResponse(200, { tasks: taskFixtures(workspace.id) }))
+      .mockReturnValueOnce(jsonResponse(200, { members: [testMember] }))
+    render(<App />)
+
+    expect(await screen.findByText('Restoring your session…')).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Bring clarity to every project.' })).not.toBeInTheDocument()
+
+    resolveSession(new Response(JSON.stringify({ user: authenticatedUser }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+    expect(await screen.findByRole('heading', { name: 'Dashboard' })).toBeInTheDocument()
+  })
+
+  it('enters an isolated temporary demo and hides privileged controls', async () => {
+    const user = userEvent.setup()
+    const demoUser = { ...authenticatedUser, name: 'Demo Visitor', email: 'visitor@demo.projectflow.invalid', demo: true, demo_expires_at: '2026-10-28T05:30:00.000Z' }
+    fetchMock
+      .mockReturnValueOnce(jsonResponse(401, { error: 'Sign in required' }))
+      .mockReturnValueOnce(jsonResponse(201, { user: demoUser }))
+      .mockReturnValueOnce(jsonResponse(200, { workspaces: [workspace] }))
+      .mockReturnValueOnce(jsonResponse(200, { projects: projectFixtures(workspace.id) }))
+      .mockReturnValueOnce(jsonResponse(200, { tasks: taskFixtures(workspace.id) }))
+      .mockReturnValueOnce(jsonResponse(200, { members: [testMember] }))
+    render(<App />)
+
+    await user.click((await screen.findAllByRole('button', { name: 'Try Live Demo' }))[0]!)
+
+    expect(await screen.findByRole('heading', { name: 'Dashboard' })).toBeInTheDocument()
+    expect(screen.getByText(/private demo workspace/i)).toBeInTheDocument()
+    expect(screen.getByText(/cleared after 30 minutes/i)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Create workspace' })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /Demo Visitor.*profile menu/i }))
+    expect(screen.getByText('Temporary demo')).toBeInTheDocument()
+    expect(screen.queryByRole('menuitem', { name: 'Profile settings' })).not.toBeInTheDocument()
+    await user.keyboard('{Escape}')
+    await user.click(screen.getAllByRole('button', { name: 'Team' })[0]!)
+    expect(await screen.findByRole('heading', { name: 'Team' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Invite member/i })).not.toBeInTheDocument()
+    expect(fetchMock.mock.calls[1]?.[0]).toBe('http://localhost:4000/api/auth/demo')
+  })
+
   it('requests password recovery without revealing account existence', async () => {
     const user = userEvent.setup()
+    window.history.replaceState({}, '', '/login')
     fetchMock
       .mockReturnValueOnce(jsonResponse(401, { error: 'Sign in required' }))
       .mockReturnValueOnce(jsonResponse(202, { message: 'If an account matches that email, a reset link has been sent.' }))
@@ -88,6 +146,7 @@ describe('frontend authentication integration', () => {
   })
 
   it('redirects unauthenticated private routes to sign in', async () => {
+    window.history.replaceState({}, '', '/projects')
     fetchMock.mockReturnValueOnce(jsonResponse(401, { error: 'Sign in required' }))
     render(<App />)
 
@@ -106,7 +165,7 @@ describe('frontend authentication integration', () => {
     render(<App />)
 
     expect(await screen.findByRole('heading', { name: 'Dashboard' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Open Jordan Lee profile menu' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Jordan Lee.*profile menu/i })).toBeInTheDocument()
     expect(fetchMock).toHaveBeenCalledWith(
       'http://localhost:4000/api/auth/me',
       expect.objectContaining({ credentials: 'include' }),
@@ -115,6 +174,7 @@ describe('frontend authentication integration', () => {
 
   it('signs in with the backend and enters the protected dashboard', async () => {
     const user = userEvent.setup()
+    window.history.replaceState({}, '', '/login')
     fetchMock
       .mockReturnValueOnce(jsonResponse(401, { error: 'Sign in required' }))
       .mockReturnValueOnce(jsonResponse(200, { user: authenticatedUser }))
@@ -136,11 +196,11 @@ describe('frontend authentication integration', () => {
 
   it('validates registration before creating an account', async () => {
     const user = userEvent.setup()
+    window.history.replaceState({}, '', '/register')
     fetchMock.mockReturnValueOnce(jsonResponse(401, { error: 'Sign in required' }))
     render(<App />)
 
-    await user.click(await screen.findByRole('link', { name: 'Create an account' }))
-    await user.type(screen.getByLabelText('Full name'), 'Jordan Lee')
+    await user.type(await screen.findByLabelText('Full name'), 'Jordan Lee')
     await user.type(screen.getByLabelText('Email address'), 'jordan@example.com')
     await user.type(screen.getByLabelText('Password'), 'short')
     await user.type(screen.getByLabelText('Confirm password'), 'different')
@@ -153,6 +213,7 @@ describe('frontend authentication integration', () => {
 
   it('shows invalid credentials without carrying them into registration', async () => {
     const user = userEvent.setup()
+    window.history.replaceState({}, '', '/login')
     fetchMock
       .mockReturnValueOnce(jsonResponse(401, { error: 'Sign in required' }))
       .mockReturnValueOnce(jsonResponse(401, { error: 'Invalid email or password' }))
@@ -180,7 +241,7 @@ describe('frontend authentication integration', () => {
       .mockReturnValueOnce(emptyResponse(204))
     render(<App />)
 
-    await user.click(await screen.findByRole('button', { name: 'Open Jordan Lee profile menu' }))
+    await user.click(await screen.findByRole('button', { name: /Jordan Lee.*profile menu/i }))
     await user.click(screen.getByRole('menuitem', { name: 'Sign out' }))
 
     expect(await screen.findByRole('heading', { name: 'Welcome back' })).toBeInTheDocument()

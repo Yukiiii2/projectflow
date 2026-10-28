@@ -5,6 +5,8 @@ export interface AuthUser {
   created_at?: string
   email_verified?: boolean
   email_verification_required?: boolean
+  demo?: boolean
+  demo_expires_at?: string
 }
 
 interface AuthResponse {
@@ -106,6 +108,18 @@ export async function register(name: string, email: string, password: string) {
     method: 'POST',
     body: JSON.stringify({ name, email, password }),
   }, { 409: 'An account with this email already exists.', 403: 'This request could not be verified. Refresh the page and try again.' })
+  return response.user
+}
+
+export async function startDemo() {
+  const response = await apiRequest<AuthResponse>('/api/auth/demo', {
+    method: 'POST',
+    body: JSON.stringify({}),
+  }, {
+    404: 'The live demo is temporarily unavailable.',
+    429: 'Demo capacity from this network has been reached. Try again later.',
+    503: 'All demo workspaces are currently in use. Try again in a few minutes.',
+  })
   return response.user
 }
 

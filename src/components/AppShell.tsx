@@ -39,6 +39,7 @@ interface AppShellProps {
   workspaceId: string
   onWorkspaceChange: (id: string) => void
   onCreateWorkspace: () => void
+  allowWorkspaceCreation: boolean
   theme: 'dark' | 'light'
   onToggleTheme: () => void
   sidebarCollapsed: boolean
@@ -70,6 +71,7 @@ interface SidebarContentProps {
   workspaceId: string
   onWorkspaceChange: (id: string) => void
   onCreateWorkspace: () => void
+  allowWorkspaceCreation: boolean
   onUnavailable: (feature: string) => void
   currentPath: string
   onRouteChange: (path: string) => void
@@ -84,6 +86,7 @@ function SidebarContent({
   workspaceId,
   onWorkspaceChange,
   onCreateWorkspace,
+  allowWorkspaceCreation,
   onUnavailable,
   currentPath,
   onRouteChange,
@@ -126,7 +129,7 @@ function SidebarContent({
         </div>
         <div className="workspace-control__meta">
           {!collapsed && <span data-testid="workspace-role">{roleLabel}</span>}
-          <button
+          {allowWorkspaceCreation && <button
             type="button"
             className="workspace-create-button"
             aria-label="Create workspace"
@@ -138,7 +141,7 @@ function SidebarContent({
           >
             <Plus size={15} aria-hidden="true" />
             {!collapsed && <span>New workspace</span>}
-          </button>
+          </button>}
         </div>
       </div>
 
@@ -153,7 +156,7 @@ function SidebarContent({
               key={item.label}
               className={`nav-item ${current ? 'is-current' : ''}`}
               aria-current={current ? 'page' : undefined}
-              aria-label={item.label}
+              aria-label={collapsed ? item.label : undefined}
               data-tooltip={collapsed ? item.label : undefined}
               onClick={() => activate(item.label, item.path)}
             >
@@ -179,7 +182,7 @@ function SidebarContent({
         <button
           type="button"
           className="nav-item"
-          aria-label="Help and support"
+          aria-label={collapsed ? 'Help and support' : 'Help & support'}
           data-tooltip={collapsed ? 'Help and support' : undefined}
           onClick={() => activate('Help and support')}
         >
@@ -232,16 +235,16 @@ function ProfileMenu({ user, signingOut, onSignOut, onUnavailable }: ProfileMenu
       <button
         type="button"
         className="profile-button"
-        aria-label={`Open ${user.name} profile menu`}
         aria-expanded={open}
         aria-haspopup="menu"
         onClick={() => setOpen((value) => !value)}
       >
-        <Avatar person={{ id: user.id, name: user.name, initials: initialsFor(user.name), color: '#8B6BE8' }} />
+        <span><Avatar person={{ id: user.id, name: user.name, initials: initialsFor(user.name), color: '#8B6BE8' }} /></span>
         <span className="profile-button__copy">
           <strong>{user.name}</strong>
-          <span>ProjectFlow account</span>
+          <span>{user.demo ? 'Temporary demo' : 'ProjectFlow account'}</span>
         </span>
+        <span className="sr-only">Open profile menu</span>
         <ChevronDown size={15} aria-hidden="true" />
       </button>
       <AnimatePresence>
@@ -259,8 +262,8 @@ function ProfileMenu({ user, signingOut, onSignOut, onUnavailable }: ProfileMenu
               <strong>{user.name}</strong>
               <span>{user.email}</span>
             </div>
-            <button type="button" role="menuitem" onClick={() => select('Profile settings')}>Profile settings</button>
-            <button type="button" role="menuitem" onClick={() => select('Account preferences')}>Account preferences</button>
+            {!user.demo && <button type="button" role="menuitem" onClick={() => select('Profile settings')}>Profile settings</button>}
+            {!user.demo && <button type="button" role="menuitem" onClick={() => select('Account preferences')}>Account preferences</button>}
             <button type="button" role="menuitem" disabled={signingOut} onClick={() => select('Sign out')}>
               {signingOut && <LoaderCircle className="spin" size={15} aria-hidden="true" />}
               {signingOut ? 'Signing out…' : 'Sign out'}
@@ -281,6 +284,7 @@ export function AppShell({
   workspaceId,
   onWorkspaceChange,
   onCreateWorkspace,
+  allowWorkspaceCreation,
   theme,
   onToggleTheme,
   sidebarCollapsed,
@@ -310,6 +314,7 @@ export function AppShell({
           workspaceId={workspaceId}
           onWorkspaceChange={onWorkspaceChange}
           onCreateWorkspace={onCreateWorkspace}
+          allowWorkspaceCreation={allowWorkspaceCreation}
           onUnavailable={onUnavailable}
           currentPath={currentPath}
           onRouteChange={onRouteChange}
@@ -367,6 +372,7 @@ export function AppShell({
                   onMobileDrawerChange(false)
                 }}
                 onCreateWorkspace={onCreateWorkspace}
+                allowWorkspaceCreation={allowWorkspaceCreation}
                 onUnavailable={onUnavailable}
                 currentPath={currentPath}
                 onRouteChange={onRouteChange}
@@ -409,12 +415,11 @@ export function AppShell({
             <button
               type="button"
               className="search-trigger"
-              aria-label="Global search"
               onClick={() => onUnavailable('Global search')}
             >
               <Search size={18} aria-hidden="true" />
               <span>Search</span>
-              <kbd>⌘ K</kbd>
+              <kbd aria-hidden="true">⌘ K</kbd>
             </button>
             <button
               type="button"
@@ -438,6 +443,11 @@ export function AppShell({
             <ProfileMenu user={user} signingOut={signingOut} onSignOut={onSignOut} onUnavailable={onUnavailable} />
           </div>
         </header>
+
+        {user.demo && <div className="demo-banner" role="status" aria-live="polite">
+          <strong>Private demo workspace</strong>
+          <span>Your changes are isolated from other visitors and cleared after 30 minutes.</span>
+        </div>}
 
         <main className="main-content">{children}</main>
 
